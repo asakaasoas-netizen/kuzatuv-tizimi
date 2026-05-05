@@ -13,20 +13,13 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Install Dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y git zip unzip openjdk-17-jdk python3-pip autoconf libtool pkg-config zlib1g-dev cmake libffi-dev libssl-dev build-essential
-          pip install --upgrade buildozer "Cython<3.0" virtualenv
-
       - name: Build with Buildozer
-        working-directory: ./client
-        run: buildozer android debug
+        uses: ArtemSBulgakov/buildozer-action@v1
+        id: buildozer
+        with:
+          command: buildozer android debug
+          buildozer_version: master
+          workdir: ./client
 
       - name: Upload APK to Artifacts
         uses: actions/upload-artifact@v4
