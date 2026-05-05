@@ -4,8 +4,8 @@ import websockets
 import aiohttp
 from jnius import autoclass, PythonJavaClass, java_method
 
-WS_URL = "ws://YOUR_RENDER_APP_URL.onrender.com/ws/device"
-UPLOAD_URL = "https://YOUR_RENDER_APP_URL.onrender.com/upload"
+WS_URL = "ws://17.10.20.105:8000/ws/device"
+UPLOAD_URL = "http://17.10.20.105:8000/upload"
 
 PythonService = autoclass('org.kivy.android.PythonService')
 mService = PythonService.mService
