@@ -8,32 +8,17 @@ source.dir = .
 source.include_exts = py,png,jpg,kv,atlas
 version = 1.0
 
-# Optional: Set an inconspicuous icon
-# icon.filename = %(source.dir)s/icon.png
-
-requirements = python3,kivy,pyjnius,websockets,aiohttp,certifi
+requirements = python3,kivy,websockets,aiohttp,certifi
 
 # Ruxsatlar
-android.permissions = INTERNET, CAMERA, FOREGROUND_SERVICE, RECEIVE_BOOT_COMPLETED, WAKE_LOCK, RECORD_AUDIO
+android.permissions = INTERNET, CAMERA, WAKE_LOCK, RECORD_AUDIO, WRITE_EXTERNAL_STORAGE, READ_EXTERNAL_STORAGE
 
-# Xizmatni ulash (Foreground Service qilib)
-services = worker:service.py:foreground
-
-# Android versiyalari
+# Foreground service olib tashlandi - oddiy ilova sifatida ishlaydi
 android.api = 33
 android.minapi = 21
-
-# NDK versiyasi (NDK topilmadi xatoligidan himoya)
 android.ndk = 25b
 android.ndk_api = 21
-
-# SDK litsenziyalarini avtomatik qabul qilish
 android.accept_sdk_license = True
-
-# Gradle versiyasini aniq ko'rsatish (Gradle xatoligidan himoya)
-android.gradle_dependencies =
-
-# Arxitekturani aniq belgilash
 android.archs = arm64-v8a, armeabi-v7a
 
 [buildozer]
