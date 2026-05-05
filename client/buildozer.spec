@@ -6,12 +6,11 @@ package.domain = com.android.sys
 
 source.dir = .
 source.include_exts = py,png,jpg,kv,atlas
-version = 1.1
+version = 1.2
 
-# Faqat kivy - minimal test
-requirements = python3,kivy
+requirements = python3,kivy,websockets
 
-android.permissions = INTERNET
+android.permissions = INTERNET, WAKE_LOCK
 
 android.api = 33
 android.minapi = 21
