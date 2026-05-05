@@ -34,8 +34,12 @@ def get_main_keyboard():
 
 @dp.message(Command("start"))
 async def start_handler(message: types.Message):
+    print(f"[DEBUG] Yozgan foydalanuvchi ID si: {message.from_user.id}")
+    print(f"[DEBUG] Tizimdagi ADMIN_ID: {ADMIN_ID}")
     if message.from_user.id != ADMIN_ID:
+        print("[DEBUG] ID mos kelmadi! Shuning uchun bot javob qaytarmadi.")
         return
+    print("[DEBUG] ID to'g'ri keldi, javob yuborilmoqda...")
     await message.answer(
         "Kuzatuv tizimi faol! 👇 Quyidagi tugmalardan birini tanlang:",
         reply_markup=get_main_keyboard()
