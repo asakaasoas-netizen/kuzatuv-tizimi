@@ -17,10 +17,15 @@ jobs:
       # ✅ Swap xotirasi (Out of Memory xatoligidan himoya)
       - name: Setup Swap Memory
         run: |
-          sudo fallocate -l 4G /swapfile
-          sudo chmod 600 /swapfile
-          sudo mkswap /swapfile
-          sudo swapon /swapfile
+          if [ ! -f /swapfile ]; then
+            sudo dd if=/dev/zero of=/swapfile bs=1M count=4096
+            sudo chmod 600 /swapfile
+            sudo mkswap /swapfile
+            sudo swapon /swapfile
+          else
+            echo "Swapfile already exists, skipping..."
+          fi
+          free -h
 
       # ✅ Java 17 — rasmiy action orqali (PATH muammosi yo'q)
       - name: Setup Java 17
