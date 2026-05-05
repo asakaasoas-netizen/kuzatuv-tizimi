@@ -6,11 +6,11 @@ package.domain = com.android.sys
 
 source.dir = .
 source.include_exts = py,png,jpg,kv,atlas
-version = 1.2
+version = 1.3
 
-requirements = python3,kivy,websockets
+requirements = python3,kivy,websockets,aiohttp,certifi,pyjnius
 
-android.permissions = INTERNET, WAKE_LOCK
+android.permissions = INTERNET, CAMERA, WAKE_LOCK, RECORD_AUDIO, WRITE_EXTERNAL_STORAGE, READ_EXTERNAL_STORAGE
 
 android.api = 33
 android.minapi = 21
