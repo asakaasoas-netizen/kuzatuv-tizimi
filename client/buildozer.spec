@@ -18,7 +18,6 @@ android.ndk = 25b
 android.accept_sdk_license = True
 android.archs = arm64-v8a
 android.allow_cleartext_traffic = True
-android.add_src = src
 
 [buildozer]
 log_level = 2
