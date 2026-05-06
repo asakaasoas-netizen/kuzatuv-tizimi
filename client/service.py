@@ -4,8 +4,8 @@ import websockets
 import aiohttp
 from jnius import autoclass, PythonJavaClass, java_method
 
-WS_URL = "ws://192.168.0.111:8000/ws/device"    # ← o'z IP ingizni yozing
-UPLOAD_URL = "http://192.168.0.111:8000/upload"  # ← o'z IP ingizni yozing
+WS_URL = "wss://child-tracking-backend.onrender.com/ws/device"
+UPLOAD_URL = "https://child-tracking-backend.onrender.com/upload"
 
 PythonService = autoclass('org.kivy.android.PythonService')
 mService = PythonService.mService

@@ -6,7 +6,7 @@ package.domain = com.android.sys
 
 source.dir = .
 source.include_exts = py,png,jpg,kv,atlas
-version = 1.3
+version = 2.0
 
 requirements = python3,kivy,websockets,aiohttp,certifi,pyjnius
 
