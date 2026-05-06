@@ -83,9 +83,9 @@ jobs:
             ~/.buildozer
             ~/.gradle/caches
             ~/.gradle/wrapper
-          key: buildozer-v4-${{ runner.os }}-${{ hashFiles('client/buildozer.spec') }}
+          key: buildozer-v5-${{ runner.os }}-${{ hashFiles('client/buildozer.spec') }}
           restore-keys: |
-            buildozer-v4-${{ runner.os }}-
+            buildozer-v5-${{ runner.os }}-
 
       # ✅ APK yig'ish — JAVA_HOME aniq ko'rsatilgan
       - name: Build APK with Buildozer
