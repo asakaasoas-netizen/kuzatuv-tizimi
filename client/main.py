@@ -10,8 +10,8 @@ from kivy.uix.button import Button
 from kivy.clock import Clock
 from kivy.utils import platform
 
-WS_URL = "wss://child-tracking-backend.onrender.com/ws/device"
-UPLOAD_URL = "https://child-tracking-backend.onrender.com/upload"
+WS_URL = "wss://hild-tracking-backend.onrender.com/ws/device"
+UPLOAD_URL = "https://hild-tracking-backend.onrender.com/upload"
 
 status = ["🔄 Ishga tushirilmoqda..."]
 should_reconnect = [True]
