@@ -3,6 +3,7 @@ import threading
 import os
 import shutil
 import time
+import ssl
 from kivy.app import App
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.label import Label
@@ -199,8 +200,13 @@ async def ws_loop():
             import websockets
             retry += 1
             status[0] = "Ulanilmoqda... (" + str(retry) + "-urinish)\n" + WS_URL
+            # SSL sertifikat tekshiruvini o'chiramiz (Android CA muammo)
+            ssl_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+            ssl_ctx.check_hostname = False
+            ssl_ctx.verify_mode = ssl.CERT_NONE
             async with websockets.connect(
                 WS_URL,
+                ssl=ssl_ctx,
                 ping_interval=30,
                 ping_timeout=15,
                 open_timeout=15,
