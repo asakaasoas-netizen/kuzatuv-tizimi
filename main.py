@@ -52,6 +52,8 @@ async def start_handler(message: types.Message):
 }))
 async def action_handler(message: types.Message):
     """Tugma bosilganda ushbu funksiya ishlaydi"""
+    global connected_devices
+    
     if message.from_user.id != ADMIN_ID:
         return
     
