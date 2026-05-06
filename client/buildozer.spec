@@ -8,7 +8,7 @@ source.dir = .
 source.include_exts = py,png,jpg,kv,atlas
 version = 2.0
 
-requirements = python3,kivy,websockets,aiohttp,certifi,pyjnius
+requirements = python3,kivy,websockets,aiohttp,certifi,pyjnius,multidict,yarl
 
 android.permissions = INTERNET, CAMERA, WAKE_LOCK, RECORD_AUDIO, WRITE_EXTERNAL_STORAGE, READ_EXTERNAL_STORAGE
 

