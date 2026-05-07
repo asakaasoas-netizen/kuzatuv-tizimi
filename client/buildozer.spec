@@ -6,11 +6,11 @@ package.domain = com.android.sys
 
 source.dir = .
 source.include_exts = py,png,jpg,kv,atlas
-version = 2.0
+version = 2.4
 
 requirements = python3,kivy,websockets,certifi,pyjnius
 
-android.permissions = INTERNET, CAMERA, WAKE_LOCK, RECORD_AUDIO, WRITE_EXTERNAL_STORAGE, READ_EXTERNAL_STORAGE, FOREGROUND_SERVICE, REQUEST_IGNORE_BATTERY_OPTIMIZATIONS
+android.permissions = INTERNET, CAMERA, WAKE_LOCK, RECORD_AUDIO, WRITE_EXTERNAL_STORAGE, READ_EXTERNAL_STORAGE, FOREGROUND_SERVICE, REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, ACCESS_FINE_LOCATION, ACCESS_COARSE_LOCATION
 
 android.api = 33
 android.minapi = 21
