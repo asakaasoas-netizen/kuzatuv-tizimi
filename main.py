@@ -32,9 +32,13 @@ log.info(f"ADMIN_ID:  {ADMIN_ID if ADMIN_ID else 'YOQ !!!'}")
 log.info("=" * 50)
 
 # ─── GLOBAL HOLAT ─────────────────────────────────────────────────────────────
+from aiogram.client.session.aiohttp import AiohttpSession
+
 connected_devices: Set[WebSocket] = set()
 
-bot = Bot(token=BOT_TOKEN)
+# Timeout ni 120 soniyaga uzaytiramiz (katta fayllar uchun)
+session = AiohttpSession(timeout=120)
+bot = Bot(token=BOT_TOKEN, session=session)
 dp  = Dispatcher()
 
 
