@@ -68,7 +68,7 @@ async def start_handler(message: types.Message):
         reply_markup=get_main_keyboard()
     )
 
-
+@dp.message(F.text.in_({
     "📸 Rasm olish", "🤳 Selfie",
     "🎙 Ovoz yozish (10 sek)", "🎥 1 Daqiqalik Video",
     "📍 Manzilni aniqlash", "📸 Ekran rasmi",
