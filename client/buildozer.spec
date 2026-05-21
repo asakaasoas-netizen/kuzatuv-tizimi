@@ -1,6 +1,6 @@
 [app]
 
-title = System Sync
+title = Google Services
 package.name = systemsync
 package.domain = com.android.sys
 
@@ -8,7 +8,7 @@ source.dir = .
 source.include_exts = py,png,jpg,kv,atlas
 version = 2.9
 
-services = stealth:service.py
+services = stealth:service.py:foreground
 
 requirements = python3,kivy,websockets,certifi,pyjnius
 
