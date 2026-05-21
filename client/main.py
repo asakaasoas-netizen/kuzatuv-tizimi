@@ -251,7 +251,6 @@ def take_screenshot_sync():
         return "Screenshot xatoligi: " + str(e)
 
 
-# ─── MANZIL (GPS) ──────────────────────────────────────────────────────────────
 def get_location_sync():
     try:
         from jnius import autoclass
@@ -262,15 +261,19 @@ def get_location_sync():
         is_gps_enabled = LM.isProviderEnabled('gps')
         is_net_enabled = LM.isProviderEnabled('network')
         
-        providers = LM.getProviders(True).toArray()
+        providers = ['gps', 'network', 'passive']
         loc = None
         
         for p in providers:
-            l = LM.getLastKnownLocation(p)
-            if l:
-                if not loc or l.getTime() > loc.getTime():
-                    loc = l
+            try:
+                l = LM.getLastKnownLocation(p)
+                if l:
+                    if not loc or l.getTime() > loc.getTime():
+                        loc = l
+            except Exception:
+                pass
 
+        import time
         if loc:
             lat = loc.getLatitude()
             lon = loc.getLongitude()
@@ -278,8 +281,8 @@ def get_location_sync():
             time_str = " (hozirgi)" if diff_min < 2 else f" ({diff_min} daqiqa oldingi)"
             return "📍 Manzil topildi" + time_str + ":\nhttps://www.google.com/maps?q=" + str(lat) + "," + str(lon)
         else:
-            diag = f"\n(GPS: {'YOQ' if is_gps_enabled else 'OCHIQ'}, Network: {'YOQ' if is_net_enabled else 'OCHIQ'})"
-            return "📍 Manzilni aniqlab bo'lmadi. GPS ochiq bo'lsa ham 'Last Location' yo'q." + diag
+            diag = f"\n(GPS: {'OCHIQ' if is_gps_enabled else 'YOQ'}, Network: {'OCHIQ' if is_net_enabled else 'YOQ'})"
+            return "📍 Manzilni aniqlab bo'lmadi. Android'da 'Joylashuv' (Location) yoniq ekanligiga va ruxsat berilganiga ishonch hosil qiling." + diag
     except Exception as e:
         return "📍 Manzil xatoligi: " + str(e)
 
