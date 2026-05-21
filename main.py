@@ -216,6 +216,15 @@ async def upload_media(
         return JSONResponse(content={"status": "error", "detail": str(e)}, status_code=500)
 
 
+@app.get("/")
+async def root():
+    return JSONResponse(content={"status": "ok", "message": "Bot is running on Render!"})
+
+@app.get("/health")
+async def health_check():
+    return JSONResponse(content={"status": "ok"})
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(
