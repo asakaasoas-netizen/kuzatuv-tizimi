@@ -116,11 +116,10 @@ async def action_handler(message: types.Message):
     await message.answer(f"⏳ Buyruq yuborildi: {message.text} ({sent} qurilma)")
 
 
-# ─── FASTAPI ──────────────────────────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     log.info("FastAPI ishga tushdi. Bot polling boshlanmoqda...")
-    polling_task = asyncio.create_task(dp.start_polling(bot))
+    polling_task = asyncio.create_task(dp.start_polling(bot, handle_signals=False))
     yield
     polling_task.cancel()
     await bot.session.close()
